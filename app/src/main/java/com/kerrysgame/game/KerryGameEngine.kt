@@ -106,7 +106,7 @@ class KerryGameEngine {
             missFlashMs = (updated.missFlashMs - deltaMs.toInt()).coerceAtLeast(0)
         )
 
-        if (updated.quoteVisible && Random.nextFloat() < 0.025f) {
+        if (updated.quoteVisible && Random.nextFloat() < 0.0111f) {
             updated = updated.copy(quoteVisible = false)
         }
 

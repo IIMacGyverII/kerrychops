@@ -34,6 +34,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -42,16 +43,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 @Composable
@@ -90,13 +98,22 @@ fun KerryGameScreen(
         ForestBackdrop(state.wave, state.backgroundScroll)
         SeasonOverlay(state)
 
+        if (state.missFlashMs > 0) {
+            Box(modifier = Modifier.zIndex(30f)) {
+                MissFlashOverlay(state.missFlashMs)
+            }
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(16.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            TopHud(state)
+            TopHud(
+                state = state,
+                modifier = Modifier.zIndex(30f)
+            )
 
             Box(
                 modifier = Modifier
@@ -117,16 +134,15 @@ fun KerryGameScreen(
         }
 
         if (state.comboBurstMs > 0) {
-            ComboBurstOverlay(state.comboBurstMs)
-        }
-
-        if (state.missFlashMs > 0) {
-            MissFlashOverlay(state.missFlashMs)
+            Box(modifier = Modifier.zIndex(30f)) {
+                ComboBurstOverlay(state.comboBurstMs)
+            }
         }
 
         AnimatedVisibility(
             visible = state.quoteVisible,
             modifier = Modifier
+                .zIndex(30f)
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 102.dp, start = 16.dp, end = 16.dp)
         ) {
@@ -283,8 +299,8 @@ private fun StatsOverlay(state: GameUiState, onClose: () -> Unit) {
 }
 
 @Composable
-private fun TopHud(state: GameUiState) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+private fun TopHud(state: GameUiState, modifier: Modifier = Modifier) {
+    Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Card(
             colors = CardDefaults.cardColors(containerColor = Color(0xCC14261F)),
             modifier = Modifier.border(2.dp, Color(0xFF2A4A38), RoundedCornerShape(12.dp))
@@ -325,6 +341,44 @@ private fun TopHud(state: GameUiState) {
 @Composable
 private fun ChoppableTree(state: GameUiState, onChop: () -> Unit) {
     val healthFraction = (state.treeHealth / state.treeMaxHealth).coerceIn(0f, 1f)
+    val context = LocalContext.current
+    val treeSpec = SpriteSheetCatalog.tree
+    val stumpSpec = SpriteSheetCatalog.treeStump
+    val effectsSpec = SpriteSheetCatalog.effects
+    val treeBitmap = remember(context) { SpriteSheetSupport.loadImageBitmap(context, treeSpec) }
+    val stumpBitmap = remember(context) { SpriteSheetSupport.loadImageBitmap(context, stumpSpec) }
+    val effectsBitmap = remember(context) { SpriteSheetSupport.loadImageBitmap(context, effectsSpec) }
+    val swingFolder = "sprites/lumberjackswings"
+    val swingFrameNames = remember(context) { SpriteSheetSupport.listAssets(context, swingFolder) }
+    val swingCache = remember { mutableStateMapOf<Int, ImageBitmap>() }
+    val firstSwingFrame = remember(context, swingFrameNames) {
+        swingFrameNames.firstOrNull()?.let { firstFrameName ->
+            SpriteSheetSupport.loadFrame(
+                context = context,
+                assetPath = "$swingFolder/$firstFrameName",
+                targetHeightPx = 360,
+                removeWhite = true
+            )
+        }
+    }
+
+    LaunchedEffect(swingFrameNames) {
+        if (swingFrameNames.isEmpty() || swingCache.isNotEmpty()) return@LaunchedEffect
+
+        swingFrameNames.forEachIndexed { index, frameName ->
+            val frame = withContext(Dispatchers.IO) {
+                SpriteSheetSupport.loadFrame(
+                    context = context,
+                    assetPath = "$swingFolder/$frameName",
+                    targetHeightPx = 360,
+                    removeWhite = true
+                )
+            }
+            if (frame != null) {
+                swingCache[index] = frame
+            }
+        }
+    }
 
     Box(
         contentAlignment = Alignment.Center,
@@ -352,323 +406,50 @@ private fun ChoppableTree(state: GameUiState, onChop: () -> Unit) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val centerX = size.width / 2
             val centerY = size.height / 2 + 20f
-            val visualPulse = ((kotlin.math.sin(state.backgroundScroll * 0.035f) + 1f) * 0.5f).coerceIn(0f, 1f)
+            val sceneOffsetX = size.width * 0.15f
+            val sceneOffsetY = size.height * 0.5f
+            val spriteScaleMultiplier = 1.5f
+            val kerryExtraOffsetX = size.width * 0.02f
+            val kerryExtraOffsetY = -size.height * 0.1f
+            val treeExtraOffsetX = size.width * 0.05f
+            val treeExtraOffsetY = size.height * 0.2f
+            val treeSizeBoost = 1.3f
+            val timerGaugeOffsetX = size.width * 0.22f
+            val timerGaugeOffsetY = -size.height * 0.05f
+            val effectsOffsetX = size.width * 0.5f
 
-            // Ground layer - grass and dirt
-            drawRect(
-                color = Color(0xFF2E1F12),
-                topLeft = Offset(0f, centerY + 110f),
-                size = androidx.compose.ui.geometry.Size(size.width, size.height - (centerY + 110f))
-            )
-            drawRect(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0x663E2B18),
-                        Color(0x00201008)
-                    )
-                ),
-                topLeft = Offset(0f, centerY + 110f),
-                size = androidx.compose.ui.geometry.Size(size.width, size.height - (centerY + 110f))
-            )
-            // Grass top layer
-            drawRect(
-                color = Color(0xFF3E7A37),
-                topLeft = Offset(0f, centerY + 110f),
-                size = androidx.compose.ui.geometry.Size(size.width, 12f)
-            )
-            // Grass tufts (pixel-art style)
-            repeat(18) { i ->
-                val gx = i * (size.width / 18f) + (i * 7f % 20f)
-                drawRect(
-                    color = Color(0xFF5A9E4A),
-                    topLeft = Offset(gx, centerY + 106f + (i % 3) * 2f),
-                    size = androidx.compose.ui.geometry.Size(8f, 8f)
-                )
-            }
-
-            // Ground ambient light strip (gives scene depth)
-            drawRect(
-                color = Color(0x2259A74C).copy(alpha = 0.14f + visualPulse * 0.09f),
-                topLeft = Offset(0f, centerY + 102f),
-                size = androidx.compose.ui.geometry.Size(size.width, 20f)
-            )
-            
-            // Environment props - rocks
-            repeat(5) { i ->
-                val rockX = centerX - 280f + (i * 140f)
-                val rockY = centerY + 120f + (i % 2) * 10f
-                // Rock base
-                drawRect(
-                    color = Color(0xFF5A5A5A),
-                    topLeft = Offset(rockX, rockY),
-                    size = androidx.compose.ui.geometry.Size(24f + (i % 2) * 8f, 16f + (i % 3) * 6f)
-                )
-                // Rock highlight
-                drawRect(
-                    color = Color(0xFF7A7A7A),
-                    topLeft = Offset(rockX + 2f, rockY + 2f),
-                    size = androidx.compose.ui.geometry.Size(8f, 6f)
-                )
-                // Rock shadow
-                drawRect(
-                    color = Color(0xFF3A3A3A),
-                    topLeft = Offset(rockX + 12f, rockY + 8f),
-                    size = androidx.compose.ui.geometry.Size(8f, 8f)
-                )
-            }
-            
-            // Tree stumps (chopped trees)
             repeat(3) { i ->
                 val stumpX = centerX + 120f + (i * 60f)
                 val stumpY = centerY + 115f
-                // Stump
-                drawRect(
-                    color = Color(0xFF5A3220),
-                    topLeft = Offset(stumpX, stumpY),
-                    size = androidx.compose.ui.geometry.Size(28f, 28f)
-                )
-                // Tree rings
-                drawCircle(
-                    color = Color(0xFF4A2810),
-                    radius = 8f,
-                    center = Offset(stumpX + 14f, stumpY + 14f)
-                )
-                drawCircle(
-                    color = Color(0xFF3A1808),
-                    radius = 4f,
-                    center = Offset(stumpX + 14f, stumpY + 14f)
-                )
-            }
-            
-            // Flowers and mushrooms
-            repeat(8) { i ->
-                val flowerX = centerX - 200f + (i * 60f)
-                val flowerY = centerY + 118f + (i % 3) * 8f
-                if (i % 3 == 0) {
-                    // Mushroom
-                    drawRect(
-                        color = Color(0xFFEEDDCC),
-                        topLeft = Offset(flowerX + 3f, flowerY + 4f),
-                        size = androidx.compose.ui.geometry.Size(4f, 8f)
-                    )
-                    drawRect(
-                        color = Color(0xFFCC4422),
-                        topLeft = Offset(flowerX, flowerY),
-                        size = androidx.compose.ui.geometry.Size(10f, 6f)
-                    )
-                    // White spots
-                    drawRect(
-                        color = Color(0xFFFFFFFF),
-                        topLeft = Offset(flowerX + 2f, flowerY + 2f),
-                        size = androidx.compose.ui.geometry.Size(2f, 2f)
-                    )
-                    drawRect(
-                        color = Color(0xFFFFFFFF),
-                        topLeft = Offset(flowerX + 6f, flowerY + 2f),
-                        size = androidx.compose.ui.geometry.Size(2f, 2f)
-                    )
-                } else {
-                    // Flower
-                    drawRect(
-                        color = Color(0xFF3A7A3A),
-                        topLeft = Offset(flowerX + 3f, flowerY + 4f),
-                        size = androidx.compose.ui.geometry.Size(2f, 10f)
-                    )
-                    val flowerColor = if (i % 2 == 0) Color(0xFFFFDD66) else Color(0xFFFF66AA)
-                    repeat(4) { petal ->
-                        val px = flowerX + 2f + (petal % 2) * 4f
-                        val py = flowerY + (petal / 2) * 4f
-                        drawRect(
-                            color = flowerColor,
-                            topLeft = Offset(px, py),
-                            size = androidx.compose.ui.geometry.Size(4f, 4f)
-                        )
-                    }
-                }
-            }
-
-            // Tree trunk - textured bark
-            val trunkColor = if (state.isBossTree) Color(0xFF4A2C14) else Color(0xFF6A3D1F)
-            val trunkDarkColor = if (state.isBossTree) Color(0xFF3A1F0E) else Color(0xFF5A2D12)
-            val trunkLightColor = if (state.isBossTree) Color(0xFF5F3A1E) else Color(0xFF7F4D2C)
-
-            // Tree contact shadow on ground
-            drawRect(
-                color = Color(0x66000000),
-                topLeft = Offset(centerX - 116f, centerY + 108f),
-                size = androidx.compose.ui.geometry.Size(232f, 18f)
-            )
-            
-            // Main trunk
-            drawRect(
-                color = trunkColor,
-                topLeft = Offset(centerX - 82f, centerY - 120f),
-                size = androidx.compose.ui.geometry.Size(164f, 240f)
-            )
-            // Bark texture - vertical lines
-            repeat(8) { i ->
-                val barkX = centerX - 70f + (i * 20f)
-                drawRect(
-                    color = trunkDarkColor,
-                    topLeft = Offset(barkX, centerY - 120f),
-                    size = androidx.compose.ui.geometry.Size(3f, 240f)
-                )
-                // Lighter highlights
-                drawRect(
-                    color = trunkLightColor,
-                    topLeft = Offset(barkX + 6f, centerY - 110f + (i % 3) * 20f),
-                    size = androidx.compose.ui.geometry.Size(2f, 30f)
-                )
-            }
-            // Bark dither texture bands
-            repeat(10) { i ->
-                drawRect(
-                    color = Color(0x33210F06),
-                    topLeft = Offset(centerX - 80f + (i % 2) * 8f, centerY - 114f + i * 24f),
-                    size = androidx.compose.ui.geometry.Size(146f, 2f)
-                )
-            }
-            // Trunk outline (pixel-art edge)
-            drawRect(
-                color = Color(0xFF2A1508),
-                topLeft = Offset(centerX - 84f, centerY - 122f),
-                size = androidx.compose.ui.geometry.Size(2f, 244f)
-            )
-            drawRect(
-                color = Color(0xFF2A1508),
-                topLeft = Offset(centerX + 82f, centerY - 122f),
-                size = androidx.compose.ui.geometry.Size(2f, 244f)
-            )
-
-            // Wood knots and texture details on trunk
-            repeat(4) { i ->
-                val knotY = centerY - 100f + (i * 50f)
-                val knotX = centerX - 40f + (i % 2) * 50f
-                // Knot
-                drawCircle(
-                    color = Color(0xFF3A1D08),
-                    radius = 8f,
-                    center = Offset(knotX, knotY)
-                )
-                drawCircle(
-                    color = Color(0xFF2A1008),
-                    radius = 4f,
-                    center = Offset(knotX, knotY)
-                )
-            }
-            
-            // Boss tree special features
-            if (state.isBossTree) {
-                // Glowing eyes on trunk
-                val eyeGlow = Color(0xFFFF4422)
-                // Left eye
-                drawRect(
-                    color = Color(0xFF000000),
-                    topLeft = Offset(centerX - 35f, centerY - 50f),
-                    size = androidx.compose.ui.geometry.Size(16f, 20f)
-                )
-                drawRect(
-                    color = eyeGlow,
-                    topLeft = Offset(centerX - 33f, centerY - 48f),
-                    size = androidx.compose.ui.geometry.Size(12f, 16f)
-                )
-                drawRect(
-                    color = Color(0xFFFFAA88),
-                    topLeft = Offset(centerX - 30f, centerY - 45f),
-                    size = androidx.compose.ui.geometry.Size(6f, 8f)
-                )
-                // Right eye
-                drawRect(
-                    color = Color(0xFF000000),
-                    topLeft = Offset(centerX + 19f, centerY - 50f),
-                    size = androidx.compose.ui.geometry.Size(16f, 20f)
-                )
-                drawRect(
-                    color = eyeGlow,
-                    topLeft = Offset(centerX + 21f, centerY - 48f),
-                    size = androidx.compose.ui.geometry.Size(12f, 16f)
-                )
-                drawRect(
-                    color = Color(0xFFFFAA88),
-                    topLeft = Offset(centerX + 24f, centerY - 45f),
-                    size = androidx.compose.ui.geometry.Size(6f, 8f)
-                )
-                
-                // Thorns on trunk
-                repeat(8) { i ->
-                    val thornX = centerX - 84f + (i % 2) * 166f
-                    val thornY = centerY - 100f + (i * 25f)
-                    drawRect(
-                        color = Color(0xFF2A1508),
-                        topLeft = Offset(thornX, thornY),
-                        size = androidx.compose.ui.geometry.Size(12f, 8f)
-                    )
-                    drawRect(
-                        color = Color(0xFF3A2010),
-                        topLeft = Offset(thornX + 2f, thornY + 2f),
-                        size = androidx.compose.ui.geometry.Size(6f, 4f)
+                if (stumpBitmap != null) {
+                    val stumpAspect = stumpSpec.frameWidth.toFloat() / stumpSpec.frameHeight.toFloat()
+                    val stumpHeight = 34f
+                    val stumpWidth = stumpHeight * stumpAspect
+                    drawSpriteFrame(
+                        bitmap = stumpBitmap,
+                        frameWidth = stumpSpec.frameWidth,
+                        frameHeight = stumpSpec.frameHeight,
+                        frameIndex = 0,
+                        dstTopLeft = Offset(stumpX, stumpY),
+                        dstSize = androidx.compose.ui.geometry.Size(stumpWidth, stumpHeight)
                     )
                 }
             }
-            
-            // Tree foliage - layered circles for depth
-            val foliageRadius = if (state.isBossTree) 120f else 98f
-            val foliageColor = if (state.isBossTree) Color(0xFF2A602A) else Color(0xFF3A7A3A)
-            val foliageDark = if (state.isBossTree) Color(0xFF1F4A1F) else Color(0xFF2A5A2A)
-            val foliageLight = if (state.isBossTree) Color(0xFF3A7A3A) else Color(0xFF4A9A4A)
-            val foliageBright = if (state.isBossTree) Color(0xFF4A9A4A) else Color(0xFF5ABA5A)
-            
-            // Shadow circles
-            drawCircle(
-                color = foliageDark,
-                radius = foliageRadius * 0.7f,
-                center = Offset(centerX - 35f, centerY - 125f)
-            )
-            drawCircle(
-                color = foliageDark,
-                radius = foliageRadius * 0.65f,
-                center = Offset(centerX + 40f, centerY - 135f)
-            )
-            // Main foliage with more layers
-            drawCircle(
-                color = foliageDark,
-                radius = foliageRadius * 1.05f,
-                center = Offset(centerX - 8f, centerY - 138f)
-            )
-            drawCircle(
-                color = foliageColor,
-                radius = foliageRadius,
-                center = Offset(centerX, centerY - 140f)
-            )
-            // Highlight circles (lighter) - more depth
-            drawCircle(
-                color = foliageLight,
-                radius = foliageRadius * 0.55f,
-                center = Offset(centerX + 20f, centerY - 155f)
-            )
-            drawCircle(
-                color = foliageLight,
-                radius = foliageRadius * 0.4f,
-                center = Offset(centerX - 25f, centerY - 150f)
-            )
-            drawCircle(
-                color = foliageBright,
-                radius = foliageRadius * 0.3f,
-                center = Offset(centerX + 15f, centerY - 165f)
-            )
-            drawCircle(
-                color = foliageBright,
-                radius = foliageRadius * 0.25f,
-                center = Offset(centerX - 18f, centerY - 160f)
-            )
-            // Leaf sparkle clusters
-            repeat(14) { i ->
-                val lx = centerX - 76f + (i * 12f)
-                val ly = centerY - 210f + (i % 4) * 18f
-                drawRect(
-                    color = Color(0x66CFF38A).copy(alpha = 0.2f + visualPulse * 0.2f),
-                    topLeft = Offset(lx, ly),
-                    size = androidx.compose.ui.geometry.Size(3f, 3f)
+
+            if (treeBitmap != null) {
+                val treeAspect = treeSpec.frameWidth.toFloat() / treeSpec.frameHeight.toFloat()
+                val scale = (if (state.isBossTree) 2.304f else 2.16f) * spriteScaleMultiplier * treeSizeBoost
+                val treeHeight = treeSpec.frameHeight * scale
+                val treeWidth = treeHeight * treeAspect
+                val treeTop = (centerY + 230f) - treeHeight + sceneOffsetY + treeExtraOffsetY
+                val treeLeft = centerX - treeWidth / 2f + 60f + sceneOffsetX + treeExtraOffsetX
+                drawSpriteFrame(
+                    bitmap = treeBitmap,
+                    frameWidth = treeSpec.frameWidth,
+                    frameHeight = treeSpec.frameHeight,
+                    frameIndex = 0,
+                    dstTopLeft = Offset(treeLeft, treeTop),
+                    dstSize = androidx.compose.ui.geometry.Size(treeWidth, treeHeight)
                 )
             }
 
@@ -677,38 +458,41 @@ private fun ChoppableTree(state: GameUiState, onChop: () -> Unit) {
             // Border
             drawRect(
                 color = Color(0xFF000000),
-                topLeft = Offset(centerX - barW / 2 - 2f, centerY + 148f),
+                topLeft = Offset(centerX - barW / 2 - 2f + timerGaugeOffsetX, centerY + 148f + timerGaugeOffsetY),
                 size = androidx.compose.ui.geometry.Size(barW + 4f, 22f)
             )
             // Background
             drawRect(
                 color = Color(0xFF3A1010),
-                topLeft = Offset(centerX - barW / 2, centerY + 150f),
+                topLeft = Offset(centerX - barW / 2 + timerGaugeOffsetX, centerY + 150f + timerGaugeOffsetY),
                 size = androidx.compose.ui.geometry.Size(barW, 18f)
             )
             // Health fill
             drawRect(
                 color = Color(0xFFFF5D52),
-                topLeft = Offset(centerX - barW / 2, centerY + 150f),
+                topLeft = Offset(centerX - barW / 2 + timerGaugeOffsetX, centerY + 150f + timerGaugeOffsetY),
                 size = androidx.compose.ui.geometry.Size(barW * healthFraction, 18f)
             )
             // Health highlight
             if (healthFraction > 0.1f) {
                 drawRect(
                     color = Color(0x88FFAA99),
-                    topLeft = Offset(centerX - barW / 2, centerY + 150f),
+                    topLeft = Offset(centerX - barW / 2 + timerGaugeOffsetX, centerY + 150f + timerGaugeOffsetY),
                     size = androidx.compose.ui.geometry.Size(barW * healthFraction, 6f)
                 )
             }
 
             // Kerry character - more detailed pixel-art style
             val kerryBob = kotlin.math.sin(state.backgroundScroll * 0.1f) * 1.8f
-            val kerryPivot = Offset(centerX - 160f, centerY + 100f + kerryBob)
+            val kerryPivot = Offset(
+                centerX - 160f + sceneOffsetX + kerryExtraOffsetX,
+                centerY + 100f + kerryBob + sceneOffsetY + kerryExtraOffsetY
+            )
             
             // Ground shadow under Kerry
             drawRect(
                 color = Color(0x44000000),
-                topLeft = Offset(kerryPivot.x - 28f, centerY + 116f),
+                topLeft = Offset(kerryPivot.x - 28f, kerryPivot.y + 16f),
                 size = androidx.compose.ui.geometry.Size(56f, 8f)
             )
             
@@ -729,381 +513,161 @@ private fun ChoppableTree(state: GameUiState, onChop: () -> Unit) {
                 )
             }
             
-            // Head outline
-            drawRect(
-                color = Color(0xFFD0A080),
-                topLeft = Offset(kerryPivot.x - 19f, kerryPivot.y - 79f),
-                size = androidx.compose.ui.geometry.Size(38f, 38f)
-            )
-            // Head
-            drawRect(
-                color = Color(0xFFE5C09C),
-                topLeft = Offset(kerryPivot.x - 18f, kerryPivot.y - 78f),
-                size = androidx.compose.ui.geometry.Size(36f, 36f)
-            )
-            // Hair with more detail
-            drawRect(
-                color = Color(0xFF4A3420),
-                topLeft = Offset(kerryPivot.x - 18f, kerryPivot.y - 82f),
-                size = androidx.compose.ui.geometry.Size(36f, 14f)
-            )
-            // Hair highlights
-            drawRect(
-                color = Color(0xFF5A4430),
-                topLeft = Offset(kerryPivot.x - 14f, kerryPivot.y - 80f),
-                size = androidx.compose.ui.geometry.Size(4f, 8f)
-            )
-            drawRect(
-                color = Color(0xFF5A4430),
-                topLeft = Offset(kerryPivot.x + 4f, kerryPivot.y - 80f),
-                size = androidx.compose.ui.geometry.Size(4f, 8f)
-            )
-            // Eyebrows
-            drawRect(
-                color = Color(0xFF3A2A1A),
-                topLeft = Offset(kerryPivot.x - 12f, kerryPivot.y - 70f),
-                size = androidx.compose.ui.geometry.Size(6f, 2f)
-            )
-            drawRect(
-                color = Color(0xFF3A2A1A),
-                topLeft = Offset(kerryPivot.x + 6f, kerryPivot.y - 70f),
-                size = androidx.compose.ui.geometry.Size(6f, 2f)
-            )
-            // Eyes
-            drawRect(
-                color = Color(0xFF2A2A2A),
-                topLeft = Offset(kerryPivot.x - 10f, kerryPivot.y - 66f),
-                size = androidx.compose.ui.geometry.Size(4f, 4f)
-            )
-            drawRect(
-                color = Color(0xFF2A2A2A),
-                topLeft = Offset(kerryPivot.x + 6f, kerryPivot.y - 66f),
-                size = androidx.compose.ui.geometry.Size(4f, 4f)
-            )
-            // Eye shine
-            drawRect(
-                color = Color(0xFFFFFFFF),
-                topLeft = Offset(kerryPivot.x - 9f, kerryPivot.y - 65f),
-                size = androidx.compose.ui.geometry.Size(2f, 2f)
-            )
-            drawRect(
-                color = Color(0xFFFFFFFF),
-                topLeft = Offset(kerryPivot.x + 7f, kerryPivot.y - 65f),
-                size = androidx.compose.ui.geometry.Size(2f, 2f)
-            )
-            // Nose
-            drawRect(
-                color = Color(0xFFD0A080),
-                topLeft = Offset(kerryPivot.x - 2f, kerryPivot.y - 60f),
-                size = androidx.compose.ui.geometry.Size(4f, 6f)
-            )
-            // Beard
-            drawRect(
-                color = Color(0xFF3A2816),
-                topLeft = Offset(kerryPivot.x - 14f, kerryPivot.y - 54f),
-                size = androidx.compose.ui.geometry.Size(28f, 14f)
-            )
-            // Beard detail (scruffy)
-            repeat(6) { i ->
-                drawRect(
-                    color = Color(0xFF4A3420),
-                    topLeft = Offset(kerryPivot.x - 12f + (i * 5f), kerryPivot.y - 40f),
-                    size = androidx.compose.ui.geometry.Size(3f, (i % 2 + 1) * 3f)
-                )
+            val swingFrameCount = swingFrameNames.size
+            val swingIndex = if (swingFrameCount > 0 && state.swingPhase > 0f) {
+                ((1f - state.swingPhase) * (swingFrameCount - 1)).toInt().coerceIn(0, swingFrameCount - 1)
+            } else if (swingFrameCount > 0) {
+                0
+            } else {
+                -1
             }
-            
-            // Torso (flannel shirt with outline)
-            drawRect(
-                color = Color(0xFF7F2F2F),
-                topLeft = Offset(kerryPivot.x - 21f, kerryPivot.y - 43f),
-                size = androidx.compose.ui.geometry.Size(42f, 58f)
-            )
-            drawRect(
-                color = Color(0xFF8F3F3F),
-                topLeft = Offset(kerryPivot.x - 20f, kerryPivot.y - 42f),
-                size = androidx.compose.ui.geometry.Size(40f, 56f)
-            )
-            // Flannel pattern (cross-hatch with more detail)
-            repeat(4) { i ->
-                drawRect(
-                    color = Color(0xFF6F2A2A),
-                    topLeft = Offset(kerryPivot.x - 16f + (i * 12f), kerryPivot.y - 38f),
-                    size = androidx.compose.ui.geometry.Size(4f, 48f)
-                )
+            val swingBitmap = if (swingIndex >= 0) {
+                swingCache[swingIndex]
+                    ?: SpriteSheetSupport.loadFrame(
+                        context = context,
+                        assetPath = "$swingFolder/${swingFrameNames[swingIndex]}",
+                        targetHeightPx = 360,
+                        removeWhite = true
+                    )?.also { swingCache[swingIndex] = it }
+                    ?: swingCache[0]
+                    ?: firstSwingFrame
+            } else {
+                null
             }
-            repeat(6) { i ->
-                drawRect(
-                    color = Color(0xFF6F2A2A),
-                    topLeft = Offset(kerryPivot.x - 18f, kerryPivot.y - 36f + (i * 9f)),
-                    size = androidx.compose.ui.geometry.Size(36f, 3f)
-                )
-            }
-            // Buttons
-            repeat(3) { i ->
-                drawRect(
-                    color = Color(0xFF2A2A2A),
-                    topLeft = Offset(kerryPivot.x - 2f, kerryPivot.y - 32f + (i * 14f)),
-                    size = androidx.compose.ui.geometry.Size(4f, 4f)
-                )
-            }
-            // Tool belt
-            drawRect(
-                color = Color(0xFF5A3820),
-                topLeft = Offset(kerryPivot.x - 22f, kerryPivot.y + 8f),
-                size = androidx.compose.ui.geometry.Size(44f, 8f)
-            )
-            drawRect(
-                color = Color(0xFF4A2810),
-                topLeft = Offset(kerryPivot.x - 22f, kerryPivot.y + 14f),
-                size = androidx.compose.ui.geometry.Size(44f, 2f)
-            )
-            // Belt buckle
-            drawRect(
-                color = Color(0xFFD5DDE2),
-                topLeft = Offset(kerryPivot.x - 4f, kerryPivot.y + 9f),
-                size = androidx.compose.ui.geometry.Size(8f, 6f)
-            )
-            // Arms with outline
-            drawRect(
-                color = Color(0xFFD0A080),
-                topLeft = Offset(kerryPivot.x + 19f, kerryPivot.y - 37f),
-                size = androidx.compose.ui.geometry.Size(14f, 42f)
-            )
-            drawRect(
-                color = Color(0xFFE5C09C),
-                topLeft = Offset(kerryPivot.x + 20f, kerryPivot.y - 36f),
-                size = androidx.compose.ui.geometry.Size(12f, 40f)
-            )
-            drawRect(
-                color = Color(0xFFD0A080),
-                topLeft = Offset(kerryPivot.x - 33f, kerryPivot.y - 37f),
-                size = androidx.compose.ui.geometry.Size(14f, 30f)
-            )
-            drawRect(
-                color = Color(0xFFE5C09C),
-                topLeft = Offset(kerryPivot.x - 32f, kerryPivot.y - 36f),
-                size = androidx.compose.ui.geometry.Size(12f, 28f)
-            )
-            
-            // Legs (jeans)
-            drawRect(
-                color = Color(0xFF3A4A6A),
-                topLeft = Offset(kerryPivot.x - 14f, kerryPivot.y + 14f),
-                size = androidx.compose.ui.geometry.Size(12f, 46f)
-            )
-            drawRect(
-                color = Color(0xFF3A4A6A),
-                topLeft = Offset(kerryPivot.x + 2f, kerryPivot.y + 14f),
-                size = androidx.compose.ui.geometry.Size(12f, 46f)
-            )
-            // Boots
-            drawRect(
-                color = Color(0xFF2A1810),
-                topLeft = Offset(kerryPivot.x - 16f, kerryPivot.y + 56f),
-                size = androidx.compose.ui.geometry.Size(14f, 10f)
-            )
-            drawRect(
-                color = Color(0xFF2A1810),
-                topLeft = Offset(kerryPivot.x + 2f, kerryPivot.y + 56f),
-                size = androidx.compose.ui.geometry.Size(14f, 10f)
-            )
-            // Glove on right hand for readability near axe
-            drawRect(
-                color = Color(0xFF6B4A2A),
-                topLeft = Offset(kerryPivot.x + 28f, kerryPivot.y - 6f),
-                size = androidx.compose.ui.geometry.Size(8f, 8f)
-            )
 
-            // Axe with better pixel-art design
-            val axeRotation = -35f + (state.swingPhase * 95f)
-            val hasFireAxe = state.upgrades.fireAxeLevel > 0
-            
-            // Pivot at Kerry's hand position (where he grips the handle)
-            rotate(axeRotation, pivot = Offset(kerryPivot.x + 28f, kerryPivot.y + 4f)) {
-                // Handle (wooden stick from hand upward to axe head)
-                drawRect(
-                    color = Color(0xFF5A3520),
-                    topLeft = Offset(kerryPivot.x + 24f, kerryPivot.y - 64f),
-                    size = androidx.compose.ui.geometry.Size(8f, 68f)
+            if (swingBitmap != null) {
+                val swingHeight = 360f * spriteScaleMultiplier
+                val swingWidth = swingHeight * (swingBitmap.width.toFloat() / swingBitmap.height.toFloat())
+                val swingTop = (kerryPivot.y + 100f) - swingHeight
+                val swingLeft = kerryPivot.x - swingWidth * 0.5f + 6f
+                drawImage(
+                    image = swingBitmap,
+                    dstOffset = IntOffset(swingLeft.roundToInt(), swingTop.roundToInt()),
+                    dstSize = IntSize(swingWidth.roundToInt(), swingHeight.roundToInt())
                 )
-                // Handle highlight
-                drawRect(
-                    color = Color(0xFF7A5530),
-                    topLeft = Offset(kerryPivot.x + 25f, kerryPivot.y - 62f),
-                    size = androidx.compose.ui.geometry.Size(3f, 64f)
-                )
-                // Handle grip wrap (darker band near bottom where hand grips)
-                drawRect(
-                    color = Color(0xFF3A2010),
-                    topLeft = Offset(kerryPivot.x + 24f, kerryPivot.y - 8f),
-                    size = androidx.compose.ui.geometry.Size(8f, 12f)
-                )
-                
-                // Fire axe glow effect (positioned at blade at top)
-                if (hasFireAxe) {
-                    val fireGlow = ((state.wave % 20) / 20f)
-                    drawRect(
-                        color = Color(0xFFFF6622).copy(alpha = 0.4f + fireGlow * 0.3f),
-                        topLeft = Offset(kerryPivot.x + 6f, kerryPivot.y - 92f),
-                        size = androidx.compose.ui.geometry.Size(40f, 30f)
-                    )
-                    // Fire particles above axe head
-                    repeat(3) { i ->
-                        drawRect(
-                            color = Color(0xFFFF8844).copy(alpha = 0.6f),
-                            topLeft = Offset(kerryPivot.x + 12f + (i * 8f), kerryPivot.y - 96f - (i * 3f)),
-                            size = androidx.compose.ui.geometry.Size(4f, 4f)
-                        )
-                    }
-                }
-                
-                // Axe head mounting (where blade connects to handle top)
-                drawRect(
-                    color = Color(0xFF4A3010),
-                    topLeft = Offset(kerryPivot.x + 22f, kerryPivot.y - 72f),
-                    size = androidx.compose.ui.geometry.Size(12f, 8f)
-                )
-                
-                // Axe blade (positioned at TOP of handle)
-                val bladeColor = if (hasFireAxe) Color(0xFFAA6A45) else Color(0xFF8A9AA5)
-                // Main blade body
-                drawRect(
-                    color = bladeColor,
-                    topLeft = Offset(kerryPivot.x + 8f, kerryPivot.y - 88f),
-                    size = androidx.compose.ui.geometry.Size(36f, 24f)
-                )
-                // Blade edge (lighter metal - the cutting edge)
-                val edgeColor = if (hasFireAxe) Color(0xFFFFAA77) else Color(0xFFD5DDE2)
-                drawRect(
-                    color = edgeColor,
-                    topLeft = Offset(kerryPivot.x + 8f, kerryPivot.y - 86f),
-                    size = androidx.compose.ui.geometry.Size(36f, 16f)
-                )
-                // Blade shine highlight
-                drawRect(
-                    color = Color(0xFFFFFFFF),
-                    topLeft = Offset(kerryPivot.x + 10f, kerryPivot.y - 84f),
-                    size = androidx.compose.ui.geometry.Size(4f, 8f)
-                )
-                // Blade dark edge/depth (bottom shadow)
-                val depthColor = if (hasFireAxe) Color(0xFF6A3A25) else Color(0xFF4A5A65)
-                drawRect(
-                    color = depthColor,
-                    topLeft = Offset(kerryPivot.x + 8f, kerryPivot.y - 70f),
-                    size = androidx.compose.ui.geometry.Size(36f, 6f)
-                )
-                // Backside poll blade for full axe silhouette
-                drawRect(
-                    color = depthColor,
-                    topLeft = Offset(kerryPivot.x + 0f, kerryPivot.y - 80f),
-                    size = androidx.compose.ui.geometry.Size(8f, 10f)
-                )
-                // Blade point/tip (triangular cutting edge)
-                drawRect(
-                    color = edgeColor,
-                    topLeft = Offset(kerryPivot.x + 40f, kerryPivot.y - 82f),
-                    size = androidx.compose.ui.geometry.Size(4f, 12f)
-                )
-                // Handle cap
-                drawRect(
-                    color = Color(0xFF2B1307),
-                    topLeft = Offset(kerryPivot.x + 23f, kerryPivot.y + 2f),
-                    size = androidx.compose.ui.geometry.Size(10f, 4f)
-                )
-
             }
 
             // Enhanced particle effects
+            val effectsFramesPerRow = effectsBitmap?.let { (it.width / effectsSpec.frameWidth).coerceAtLeast(1) } ?: 1
             state.chips.forEach { chip ->
                 val chipRotation = (chip.x + chip.y) * 3f
-                
-                // Wood chips - blocky particles with rotation effect
-                rotate(chipRotation, pivot = Offset(centerX + chip.x, centerY + chip.y)) {
-                    // Wood chip (rectangular)
-                    drawRect(
-                        color = Color(0xFFD8B077),
-                        topLeft = Offset(centerX + chip.x - 5f, centerY + chip.y - 3f),
-                        size = androidx.compose.ui.geometry.Size(10f, 6f)
-                    )
-                    // Chip highlight
-                    drawRect(
-                        color = Color(0xFFEED0A0),
-                        topLeft = Offset(centerX + chip.x - 4f, centerY + chip.y - 2f),
-                        size = androidx.compose.ui.geometry.Size(4f, 2f)
-                    )
-                    // Chip shadow
-                    drawRect(
-                        color = Color(0xFFB08855),
-                        topLeft = Offset(centerX + chip.x, centerY + chip.y + 1f),
-                        size = androidx.compose.ui.geometry.Size(5f, 2f)
-                    )
-                }
-                
-                // Impact sparks (on fresh chips near tree)
-                if (chip.y < 20f && kotlin.math.abs(chip.vx) > 2f) {
-                    repeat(2) { i ->
+
+                if (effectsBitmap != null) {
+                    val chipFrame = ((chip.lifeMs / 40L).toInt() % effectsFramesPerRow)
+                    val chipIndex = chipFrame
+                    val chipSize = 34f
+                    rotate(chipRotation, pivot = Offset(centerX + chip.x + effectsOffsetX, centerY + chip.y)) {
                         drawRect(
-                            color = Color(0xFFFFDD88).copy(alpha = 0.8f),
-                            topLeft = Offset(centerX + chip.x + (i * 3f), centerY + chip.y - (i * 2f)),
-                            size = androidx.compose.ui.geometry.Size(3f, 3f)
+                            color = Color(0xFFFFE0A3).copy(alpha = 0.45f),
+                            topLeft = Offset(centerX + chip.x + effectsOffsetX - chipSize * 0.45f, centerY + chip.y - chipSize * 0.45f),
+                            size = androidx.compose.ui.geometry.Size(chipSize * 0.9f, chipSize * 0.9f)
+                        )
+                        drawSpriteFrame(
+                            bitmap = effectsBitmap,
+                            frameWidth = effectsSpec.frameWidth,
+                            frameHeight = effectsSpec.frameHeight,
+                            frameIndex = chipIndex,
+                            dstTopLeft = Offset(centerX + chip.x + effectsOffsetX - chipSize * 0.5f, centerY + chip.y - chipSize * 0.5f),
+                            dstSize = androidx.compose.ui.geometry.Size(chipSize, chipSize)
+                        )
+                    }
+
+                    // Impact sparks (row 1)
+                    if (chip.y < 20f && kotlin.math.abs(chip.vx) > 2f) {
+                        val sparkFrame = ((chip.lifeMs / 30L).toInt() % effectsFramesPerRow)
+                        val sparkIndex = effectsFramesPerRow + sparkFrame
+                        val sparkSize = 22f
+                        drawRect(
+                            color = Color(0xFFFFF1B8).copy(alpha = 0.6f),
+                            topLeft = Offset(centerX + chip.x + effectsOffsetX - sparkSize * 0.5f, centerY + chip.y - 12f - sparkSize * 0.5f),
+                            size = androidx.compose.ui.geometry.Size(sparkSize, sparkSize)
+                        )
+                        drawSpriteFrame(
+                            bitmap = effectsBitmap,
+                            frameWidth = effectsSpec.frameWidth,
+                            frameHeight = effectsSpec.frameHeight,
+                            frameIndex = sparkIndex,
+                            dstTopLeft = Offset(centerX + chip.x + effectsOffsetX, centerY + chip.y - 10f),
+                            dstSize = androidx.compose.ui.geometry.Size(sparkSize, sparkSize)
                         )
                     }
                 }
             }
-            
+
             // Falling leaves from tree foliage
             if (state.swingPhase > 0.5f) {
                 repeat(4) { i ->
-                    val leafX = centerX + ((i - 2) * 30f) + (state.swingPhase * 15f)
+                    val leafX = centerX + effectsOffsetX + ((i - 2) * 30f) + (state.swingPhase * 15f)
                     val leafY = centerY - 140f + (state.swingPhase * 40f) + (i * 8f)
-                    // Leaf
-                    drawRect(
-                        color = Color(0xFF4A8A4F),
-                        topLeft = Offset(leafX, leafY),
-                        size = androidx.compose.ui.geometry.Size(6f, 8f)
-                    )
-                    drawRect(
-                        color = Color(0xFF5AAA5F),
-                        topLeft = Offset(leafX + 1f, leafY + 1f),
-                        size = androidx.compose.ui.geometry.Size(3f, 4f)
-                    )
+                    if (effectsBitmap != null && effectsFramesPerRow > 0) {
+                        val leafFrame = ((state.swingPhase * 10f).toInt() + i) % effectsFramesPerRow
+                        val leafIndex = (effectsFramesPerRow * 3) + leafFrame
+                        val leafSize = 26f
+                        drawRect(
+                            color = Color(0xFFB8E89C).copy(alpha = 0.35f),
+                            topLeft = Offset(leafX - 4f, leafY - 4f),
+                            size = androidx.compose.ui.geometry.Size(leafSize + 8f, leafSize + 8f)
+                        )
+                        drawSpriteFrame(
+                            bitmap = effectsBitmap,
+                            frameWidth = effectsSpec.frameWidth,
+                            frameHeight = effectsSpec.frameHeight,
+                            frameIndex = leafIndex,
+                            dstTopLeft = Offset(leafX, leafY),
+                            dstSize = androidx.compose.ui.geometry.Size(leafSize, leafSize)
+                        )
+                    }
                 }
             }
-            
+
             // Dust cloud on impact
             if (state.swingPhase > 0.7f) {
-                val dustAlpha = (1f - state.swingPhase) * 1.5f
-                repeat(5) { i ->
-                    drawCircle(
-                        color = Color(0xFFCCBBAA).copy(alpha = dustAlpha.coerceIn(0f, 0.4f)),
-                        radius = 6f + (i * 2f),
-                        center = Offset(centerX + (i - 2) * 12f, centerY - 20f + (i * 4f))
+                if (effectsBitmap != null && effectsFramesPerRow > 0) {
+                    val dustFrame = ((state.swingPhase * 12f).toInt() % effectsFramesPerRow)
+                    val dustIndex = (effectsFramesPerRow * 2) + dustFrame
+                    val dustSize = 64f
+                    drawRect(
+                        color = Color(0xFFFFE8C4).copy(alpha = 0.35f),
+                        topLeft = Offset(centerX + effectsOffsetX - dustSize * 0.55f, centerY - 34f),
+                        size = androidx.compose.ui.geometry.Size(dustSize * 1.1f, dustSize * 0.9f)
+                    )
+                    drawSpriteFrame(
+                        bitmap = effectsBitmap,
+                        frameWidth = effectsSpec.frameWidth,
+                        frameHeight = effectsSpec.frameHeight,
+                        frameIndex = dustIndex,
+                        dstTopLeft = Offset(centerX + effectsOffsetX - dustSize * 0.5f, centerY - 30f),
+                        dstSize = androidx.compose.ui.geometry.Size(dustSize, dustSize)
                     )
                 }
             }
-
-            // Swing impact flash (short, pixel style)
-            if (state.swingPhase > 0.78f) {
-                val flashAlpha = ((state.swingPhase - 0.78f) / 0.22f).coerceIn(0f, 1f)
-                drawRect(
-                    color = Color(0xFFFFE9A8).copy(alpha = (1f - flashAlpha) * 0.7f),
-                    topLeft = Offset(centerX + 58f, centerY - 84f),
-                    size = androidx.compose.ui.geometry.Size(14f, 14f)
-                )
-            }
-
-            // Subtle vignette for focus
-            drawRect(
-                brush = Brush.radialGradient(
-                    colors = listOf(Color.Transparent, Color(0x66101410)),
-                    center = Offset(centerX, centerY - 20f),
-                    radius = size.minDimension * 0.85f
-                ),
-                topLeft = Offset.Zero,
-                size = size
-            )
         }
     }
+}
+
+private fun DrawScope.drawSpriteFrame(
+    bitmap: ImageBitmap,
+    frameWidth: Int,
+    frameHeight: Int,
+    frameIndex: Int,
+    dstTopLeft: Offset,
+    dstSize: androidx.compose.ui.geometry.Size
+) {
+    val safeFrameWidth = if (bitmap.width % frameWidth == 0) frameWidth else bitmap.width
+    val safeFrameHeight = if (bitmap.height % frameHeight == 0) frameHeight else bitmap.height
+    val framesPerRow = (bitmap.width / safeFrameWidth).coerceAtLeast(1)
+    val framesPerColumn = (bitmap.height / safeFrameHeight).coerceAtLeast(1)
+    val framesTotal = (framesPerRow * framesPerColumn).coerceAtLeast(1)
+    val safeIndex = frameIndex.coerceIn(0, framesTotal - 1)
+    val srcX = (safeIndex % framesPerRow) * safeFrameWidth
+    val srcY = (safeIndex / framesPerRow) * safeFrameHeight
+    drawImage(
+        image = bitmap,
+        srcOffset = IntOffset(srcX, srcY),
+        srcSize = IntSize(safeFrameWidth, safeFrameHeight),
+        dstOffset = IntOffset(dstTopLeft.x.roundToInt(), dstTopLeft.y.roundToInt()),
+        dstSize = IntSize(dstSize.width.roundToInt(), dstSize.height.roundToInt())
+    )
 }
 
 @Composable
@@ -1160,197 +724,47 @@ private fun QuoteBubble(text: String) {
 
 @Composable
 private fun ForestBackdrop(wave: Int, backgroundScroll: Float) {
-    val offsetSeed = (wave % 8) * 12
-    val scrollOffset = backgroundScroll % 140f
+    val context = LocalContext.current
+    val backgroundSpec = SpriteSheetCatalog.background
+    val backgroundBitmap = remember(context) { SpriteSheetSupport.loadImageBitmap(context, backgroundSpec) }
+
     Canvas(modifier = Modifier.fillMaxSize()) {
-        // Sky gradient with atmospheric depth
-        drawRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(
-                    Color(0xFF334D40),
-                    Color(0xFF203A2E),
-                    Color(0xFF15281F)
-                )
-            ),
-            topLeft = Offset(0f, 0f),
-            size = androidx.compose.ui.geometry.Size(size.width, size.height * 0.6f)
-        )
+        if (backgroundBitmap == null) {
+            drawRect(color = Color.Black, size = size)
+            return@Canvas
+        }
 
-        // Horizon glow layer
-        drawRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(Color(0x002FA671), Color(0x443EA469), Color(0x001A3A2A))
-            ),
-            topLeft = Offset(0f, size.height * 0.33f),
-            size = androidx.compose.ui.geometry.Size(size.width, size.height * 0.3f)
-        )
+        val srcWidth = backgroundBitmap.width
+        val srcHeight = backgroundBitmap.height
+        val sourceAspect = srcWidth.toFloat() / srcHeight.toFloat()
+        val targetAspect = size.width / size.height
 
-        // Tiny sky speckles for atmosphere
-        repeat(26) { i ->
-            val sx = (i * (size.width / 24f) + (wave % 5) * 9f) % size.width
-            val sy = size.height * 0.06f + (i % 6) * 16f
-            drawRect(
-                color = Color(0x33D8EFE0),
-                topLeft = Offset(sx, sy),
-                size = androidx.compose.ui.geometry.Size(2f, 2f)
-            )
+        val baseSrcWidth: Int
+        val baseSrcHeight: Int
+        if (sourceAspect > targetAspect) {
+            baseSrcHeight = srcHeight
+            baseSrcWidth = (srcHeight * targetAspect).toInt().coerceAtMost(srcWidth)
+        } else {
+            baseSrcWidth = srcWidth
+            baseSrcHeight = (srcWidth / targetAspect).toInt().coerceAtMost(srcHeight)
         }
-        
-        // Clouds (very slow parallax)
-        val cloudScroll = scrollOffset * 0.1f
-        repeat(5) { i ->
-            val cx = ((i * (size.width / 4f)) + cloudScroll) % (size.width + 120f) - 60f
-            val cy = size.height * 0.15f + (i % 3) * 35f
-            // Cloud puffs
-            drawCircle(
-                color = Color(0x33D4E8DF),
-                radius = 45f,
-                center = Offset(cx, cy)
-            )
-            drawCircle(
-                color = Color(0x33D4E8DF),
-                radius = 38f,
-                center = Offset(cx + 30f, cy + 8f)
-            )
-            drawCircle(
-                color = Color(0x33D4E8DF),
-                radius = 42f,
-                center = Offset(cx + 55f, cy)
-            )
+
+        val maxPan = (srcWidth - baseSrcWidth).coerceAtLeast(0)
+        val pan = if (maxPan > 0) {
+            ((backgroundScroll * 0.35f).toInt() % (maxPan + 1)).coerceIn(0, maxPan)
+        } else {
+            0
         }
-        
-        // Distant fog/mist layer
-        drawRect(
-            color = Color(0x22A8C4B8),
-            topLeft = Offset(0f, size.height * 0.42f),
-            size = androidx.compose.ui.geometry.Size(size.width, size.height * 0.12f)
+        val srcX = ((srcWidth - baseSrcWidth) / 2 + pan).coerceIn(0, srcWidth - baseSrcWidth)
+        val srcY = ((srcHeight - baseSrcHeight) / 2).coerceAtLeast(0)
+
+        drawImage(
+            image = backgroundBitmap,
+            srcOffset = IntOffset(srcX, srcY),
+            srcSize = IntSize(baseSrcWidth, baseSrcHeight),
+            dstOffset = IntOffset(0, 0),
+            dstSize = IntSize(size.width.toInt(), size.height.toInt())
         )
-        drawRect(
-            color = Color(0x1AA6CABB),
-            topLeft = Offset(0f, size.height * 0.50f),
-            size = androidx.compose.ui.geometry.Size(size.width, size.height * 0.08f)
-        )
-        
-        // Far background mountains/hills (darkest, slowest parallax)
-        val mountainScroll = scrollOffset * 0.2f
-        repeat(6) { i ->
-            val mx = (i * (size.width / 5f)) + mountainScroll
-            val mxWrapped = (mx % (size.width + 120f)) - 60f
-            // Mountain with jagged top
-            drawRect(
-                color = Color(0xFF1A2C20),
-                topLeft = Offset(mxWrapped - 35f, size.height * 0.48f - (i % 2) * 20f),
-                size = androidx.compose.ui.geometry.Size(170f, size.height * 0.52f + (i % 2) * 20f)
-            )
-            // Jagged peaks
-            repeat(8) { j ->
-                drawRect(
-                    color = Color(0xFF0E1A14),
-                    topLeft = Offset(mxWrapped - 30f + (j * 22f), size.height * 0.48f - (i % 2) * 20f - (j % 3) * 12f),
-                    size = androidx.compose.ui.geometry.Size(8f, (j % 3) * 12f + 8f)
-                )
-            }
-        }
-        
-        // Mid background trees (darker, medium parallax)
-        val midScroll = scrollOffset * 0.5f
-        repeat(10) { i ->
-            val baseX = (i * (size.width / 10f)) + offsetSeed * 0.6f + midScroll
-            val x = (baseX % (size.width + 90f)) - 45f
-            val treeHeight = size.height * 0.42f
-            val yOffset = size.height * 0.58f + (i % 4) * 8f
-            
-            // Trunk
-            drawRect(
-                color = Color(0x88344D32),
-                topLeft = Offset(x, yOffset),
-                size = androidx.compose.ui.geometry.Size(18f, treeHeight)
-            )
-            // Foliage - layered for depth
-            drawCircle(
-                color = Color(0x88275A28),
-                radius = 32f + (i % 3) * 6f,
-                center = Offset(x + 9f, yOffset + 8f)
-            )
-            drawCircle(
-                color = Color(0x88326E33),
-                radius = 24f + (i % 2) * 4f,
-                center = Offset(x + 9f, yOffset - 4f)
-            )
-        }
-        
-        // Foreground trees (lighter, faster parallax with sway)
-        repeat(14) { i ->
-            val baseX = (i * (size.width / 12f)) + offsetSeed + scrollOffset
-            val x = (baseX % (size.width + 80f)) - 40f
-            val treeHeight = size.height * 0.45f
-            val yOffset = size.height * 0.55f + (i % 3) * 6f
-            
-            // Subtle sway animation
-            val swayAmount = kotlin.math.sin((scrollOffset + (i * 30f)) * 0.05f) * 3f
-            
-            // Trunk with texture (with sway applied to top)
-            val trunkW = 22f
-            drawRect(
-                color = Color(0xDD344D32),
-                topLeft = Offset(x, yOffset),
-                size = androidx.compose.ui.geometry.Size(trunkW, treeHeight)
-            )
-            // Bark lines
-            drawRect(
-                color = Color(0xDD2A3D28),
-                topLeft = Offset(x + 4f, yOffset),
-                size = androidx.compose.ui.geometry.Size(2f, treeHeight)
-            )
-            drawRect(
-                color = Color(0xDD2A3D28),
-                topLeft = Offset(x + 14f, yOffset),
-                size = androidx.compose.ui.geometry.Size(2f, treeHeight)
-            )
-            
-            // Foliage - multiple circles for bushiness (with sway)
-            val foliageRadius = 28f + (i % 3) * 8f
-            drawCircle(
-                color = Color(0xDD2E5A2F),
-                radius = foliageRadius * 0.8f,
-                center = Offset(x + trunkW / 2 - 12f + swayAmount, yOffset + 5f)
-            )
-            drawCircle(
-                color = Color(0xDD3E7144),
-                radius = foliageRadius,
-                center = Offset(x + trunkW / 2 + swayAmount, yOffset)
-            )
-            drawCircle(
-                color = Color(0xDD4A8A4F),
-                radius = foliageRadius * 0.65f,
-                center = Offset(x + trunkW / 2 + 8f + swayAmount, yOffset - 8f)
-            )
-            
-            // Bush at base
-            drawCircle(
-                color = Color(0xDD3A6A3E),
-                radius = 14f + (i % 2) * 4f,
-                center = Offset(x + trunkW / 2 + (swayAmount * 0.3f), yOffset + treeHeight - 8f)
-            )
-        }
-        
-        // Foreground grass/plants (with gentle sway)
-        repeat(24) { i ->
-            val gx = (i * (size.width / 24f) + scrollOffset * 1.3f) % size.width
-            val gy = size.height * 0.85f + (i % 4) * 12f
-            val grassSway = kotlin.math.sin((scrollOffset + (i * 20f)) * 0.07f) * 2f
-            // Grass blades
-            drawRect(
-                color = Color(0xDD4A9A4F),
-                topLeft = Offset(gx + grassSway, gy),
-                size = androidx.compose.ui.geometry.Size(4f, 16f + (i % 3) * 6f)
-            )
-            drawRect(
-                color = Color(0xDD5AAA5F),
-                topLeft = Offset(gx + 1f + (grassSway * 0.7f), gy),
-                size = androidx.compose.ui.geometry.Size(2f, 10f)
-            )
-        }
     }
 }
 
@@ -1472,7 +886,7 @@ private fun ComboBurstOverlay(comboBurstMs: Int) {
         drawCircle(
             color = Color(0x55FFF2B0).copy(alpha = alpha),
             radius = size.minDimension * (0.12f + (1f - alpha) * 0.2f),
-            center = Offset(size.width * 0.5f, size.height * 0.45f)
+            center = Offset(size.width * 1.0f, size.height * 0.62f)
         )
     }
 }
