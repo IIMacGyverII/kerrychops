@@ -48,3 +48,20 @@
 - Power-of-2 dimensions work best (16x16, 32x32, 64x64)
 - Organize as sprite sheets (multiple frames in one image)
 - Keep consistent pixel density across all assets
+
+## Project Import Paths (Prepared)
+- Drop sheets into: `app/src/main/assets/sprites/`
+- Current scaffold file: `app/src/main/java/com/kerrysgame/game/SpriteSheetSupport.kt`
+- Placeholder/readme: `app/src/main/assets/sprites/README.txt`
+
+## Expected Starter Sheets
+- `sprites/kerry_sheet.png` (32x32 frames)
+- `sprites/tree_sheet.png` (64x64 frames)
+- `sprites/effects_sheet.png` (16x16 frames)
+- `sprites/background_sheet.png` (16x16 tiles)
+
+## OpenGameArt Checklist
+- Confirm license allows game distribution (prefer CC0 or CC-BY)
+- Keep the attribution text for your final credits screen/readme
+- Ensure each sheet has consistent frame size per row
+- If needed, convert and trim sheets in LibreSprite/Piskel before import
