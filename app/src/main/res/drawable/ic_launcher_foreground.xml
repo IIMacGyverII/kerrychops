@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Axe silhouette for Kerry Chops icon.
+    Canvas: 108x108 (safe zone 18-90 on each axis).
+    Axe is angled ~45°, blade upper-left, handle lower-right.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Axe handle (diagonal parallelogram, dark brown wood) -->
+    <path
+        android:fillColor="#8D6E63"
+        android:pathData="M62,90 L54,90 L38,48 L46,48 Z" />
+
+    <!-- Handle wrap / grip (darker band near center) -->
+    <path
+        android:fillColor="#5D4037"
+        android:pathData="M53,72 L57,72 L48,58 L44,58 Z" />
+
+    <!-- Axe blade (warm silver/cream head) -->
+    <path
+        android:fillColor="#ECEFF1"
+        android:pathData="M46,48 L38,48 L18,54 Q14,30 32,18 L48,36 Z" />
+
+    <!-- Blade bevel highlight (brighter inner edge, sharp side) -->
+    <path
+        android:fillColor="#CFD8DC"
+        android:pathData="M38,48 L22,52 Q18,34 34,22 L46,38 Z" />
+
+    <!-- Blade gleam (bright edge on the cutting line) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M20,54 Q13,32 31,19 L34,22 Q18,34 22,52 Z" />
+
+</vector>
