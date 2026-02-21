@@ -112,8 +112,8 @@ class GameViewModel(
                 val previous = _uiState.value
                 val newState = engine.onTick(previous, 16L)
                 _uiState.value = newState
-                // Trigger swing sound when animElapsedMs crosses 240ms (halfway through 480ms animation)
-                if (previous.animElapsedMs in 1L until 120L && newState.animElapsedMs >= 120L) {
+                // Trigger swing sound when animElapsedMs crosses 60ms (1/8 through 480ms animation)
+                if (previous.animElapsedMs in 1L until 60L && newState.animElapsedMs >= 60L) {
                     soundEffectManager.playSwing()
                 }
             }

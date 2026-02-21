@@ -1,4 +1,4 @@
-# Kerry's Chopper (Android, Kotlin + Jetpack Compose)
+# Kerry Chops (Android, Kotlin + Jetpack Compose)
 
 Endless arcade clicker about Kerry, a sarcastic lumberjack with a lifted white '78 Jeep, chopping through increasingly stubborn trees.
 
@@ -18,8 +18,10 @@ Endless arcade clicker about Kerry, a sarcastic lumberjack with a lifted white '
 
 ## Recent Improvements (Latest Session)
 
+✅ **App rename**: App is now called **Kerry Chops** (was "Kerrys Chopper").  
+✅ **Custom icon**: Adaptive launcher icon — axe silhouette (brown handle, silver blade with gleam) on a deep forest green background.  
 ✅ **Animation**: Decoupled 145-frame animation timer from `swingPhase`. `animElapsedMs` runs independently so the full animation cycles smoothly over 480ms regardless of chop speed upgrades.  
-✅ **Sound sync**: Swing sound tied directly to `animElapsedMs` crossing 120ms (1/4 into the animation). Leading 412ms of silence trimmed from `axe_swing.ogg` via ffmpeg.  
+✅ **Sound sync**: Swing sound fires when `animElapsedMs` crosses 60ms (1/8 into the 480ms animation). Leading 412ms of silence trimmed from `axe_swing.ogg` via ffmpeg.  
 ✅ **Chop speed**: Base chop cooldown set to 844ms (~1.2 chops/sec). Each Quicker Axe level reduces by 22ms, floor at 80ms.  
 ✅ **Fire Axe**: Now hit-triggered DoT — each chop refreshes a 3-second burn window, ticking every 350ms. Stops if no new hit lands.  
 ✅ **Stronger Arms**: Same hit-triggered pattern — active for 3 seconds after a chop, passive DPS stops when timer expires.  
@@ -53,7 +55,7 @@ Endless arcade clicker about Kerry, a sarcastic lumberjack with a lifted white '
 | Constant | File | Value | Purpose |
 |---|---|---|---|
 | `ANIM_TOTAL_MS` | `KerryGameEngine.kt` + `GameUi.kt` | `480L` | Full animation cycle duration |
-| Sound trigger | `GameViewModel.kt` | `120L` | ms into animation when swing sound fires |
+| Sound trigger | `GameViewModel.kt` | `60L` | ms into animation when swing sound fires (1/8 of cycle) |
 | Base cooldown | `KerryGameEngine.kt` | `844L` | Base ms between chops |
 | Burn/auto duration | `KerryGameEngine.kt` | `3000L` | ms fire axe / stronger arms stay active after hit |
 
