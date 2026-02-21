@@ -10,10 +10,11 @@ Endless arcade clicker about Kerry, a sarcastic lumberjack with a lifted white '
 - **Endless progression** with waves and boss trees every 10 waves.
 - **Seasonal modifiers** (spring / summer / autumn / winter with health/wood multipliers).
 - **Upgrade shop** with 6 upgrades: axe speed, axe power, auto chop, lucky wood, fire axe, double chop.
-  - Auto chop & fire axe now **visually show red circles** when ticking damage
+  - Auto chop & fire axe now **show numeric damage markers** with gold outline
   - Passive upgrades **significantly buffed** for better feel (2.5x auto chop, 2.2x fire axe, 2x double chop frequency)
 - **Combo system** (max 100, +5% damage per level, visual burst at combo 20+)
 - **Stacked quote system** - Kerry's sarcastic comments appear at top of screen, stack vertically when multiple fire
+- **No combo glow** behind Kerry (cleaner silhouette)
 - **Daily challenge** (500 chops without miss) + 5 achievements
 - **Parallel frame preloading** on app startup (no startup jank)
 - **DataStore persistence** for all progression, upgrades, and stats
@@ -21,8 +22,8 @@ Endless arcade clicker about Kerry, a sarcastic lumberjack with a lifted white '
 ## Recent Improvements (Latest Session)
 
 ✅ **Upgrade Balance**: Passive upgrades (auto chop + fire axe) now deal meaningful damage
-✅ **Damage Feedback**: Red circle markers show when passive upgrades tick
-✅ **Quote Display**: Moved to top of screen, extended duration +10%, multiple quotes stack
+✅ **Damage Feedback**: Numeric hit markers with gold outline for passive upgrades
+✅ **Quote Display**: Moved to top of screen, extended duration +30%, tighter stacking
 ✅ **Performance**: Frame loading fully parallellized (16x batch loading on IO thread)
 ✅ **Animation Assets**: Replaced with transparent-background variants for cleaner visuals
 
