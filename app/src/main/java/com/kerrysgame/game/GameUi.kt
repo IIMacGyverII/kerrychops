@@ -682,13 +682,13 @@ private fun ChoppableTree(state: GameUiState, onChop: () -> Unit) {
 
                 val outlineStyle = TextStyle(
                     color = Color(0xFFFFD700).copy(alpha = alpha),
-                    fontSize = 24.sp,
+                    fontSize = 36.sp,
                     fontWeight = FontWeight.Bold,
                     drawStyle = Stroke(width = 2f)
                 )
                 val fillStyle = TextStyle(
                     color = Color(0xFFFF6B6B).copy(alpha = alpha),
-                    fontSize = 24.sp,
+                    fontSize = 36.sp,
                     fontWeight = FontWeight.Bold
                 )
                 drawText(

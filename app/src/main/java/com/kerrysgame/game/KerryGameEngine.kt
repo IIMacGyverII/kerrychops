@@ -195,7 +195,7 @@ class KerryGameEngine {
             comboBurstMs = if (reachedBurst) 420 else updated.comboBurstMs
         )
 
-        updated = applyDamage(updated, damage, isManual = true)
+        updated = applyDamage(updated, damage, isManual = true, showDamageNumber = true)
         updated = updated.copy(
             bestCombo = max(updated.bestCombo, updated.combo),
             bestRunWood = max(updated.bestRunWood, updated.wood)
@@ -210,7 +210,7 @@ class KerryGameEngine {
             val newQuote = Quote(
                 id = nextQuoteId++,
                 text = kerryQuotes.random(),
-                lifeMs = 2080L
+                lifeMs = 3900L
             )
             updated = updated.copy(quotes = updated.quotes + newQuote)
         }
@@ -271,9 +271,9 @@ class KerryGameEngine {
         var damageNumbers = state.damageNumbers
         if (showDamageNumber && comboDamage > 0.1f) {
             val baseX = 0f
-            val baseY = -120f
-            val jitterRangeX = 6f
-            val jitterRangeY = 6f
+            val baseY = if (isManual) -120f else -60f
+            val jitterRangeX = 20f
+            val jitterRangeY = 20f
             val dmgNum = DamageNumber(
                 id = nextDamageNumberId++,
                 damage = comboDamage.toInt(),
@@ -281,7 +281,7 @@ class KerryGameEngine {
                 y = baseY,
                 jitterX = Random.nextFloat() * 2f * jitterRangeX - jitterRangeX,
                 jitterY = Random.nextFloat() * 2f * jitterRangeY - jitterRangeY,
-                lifeMs = 600L
+                lifeMs = 1000L
             )
             val capped = (damageNumbers + dmgNum).takeLast(8)
             damageNumbers = capped

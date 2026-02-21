@@ -25,7 +25,10 @@ Endless arcade clicker about Kerry, a sarcastic lumberjack with a lifted white '
 ✅ **Chop speed**: Base chop cooldown set to 844ms (~1.2 chops/sec). Each Quicker Axe level reduces by 22ms, floor at 80ms.  
 ✅ **Fire Axe**: Now hit-triggered DoT — each chop refreshes a 3-second burn window, ticking every 350ms. Stops if no new hit lands.  
 ✅ **Stronger Arms**: Same hit-triggered pattern — active for 3 seconds after a chop, passive DPS stops when timer expires.  
-✅ **Upgrade HUD**: Top-right score card now lists owned upgrades with level and live effect values.
+✅ **Upgrade HUD**: Top-right score card now lists owned upgrades with level and live effect values.  
+✅ **Damage numbers**: Fixed — now visible on every manual chop. Font size 36sp, 1000ms lifetime, ±20px random jitter.  
+✅ **DPS damage numbers**: Spawn 60px lower than manual chop numbers to reduce overlap.  
+✅ **Quote duration**: Increased to 3900ms (+25% from prior 3120ms).
 
 ## Upgrade Details
 
@@ -58,6 +61,10 @@ Endless arcade clicker about Kerry, a sarcastic lumberjack with a lifted white '
 | Sound trigger | `GameViewModel.kt` | `60L` | ms into animation when swing sound fires (1/8 of cycle) |
 | Base cooldown | `KerryGameEngine.kt` | `844L` | Base ms between chops |
 | Burn/auto duration | `KerryGameEngine.kt` | `3000L` | ms fire axe / stronger arms stay active after hit |
+| Quote duration | `KerryGameEngine.kt` | `3900L` | ms Kerry's quote boxes stay visible |
+| Damage number lifetime | `KerryGameEngine.kt` | `1000L` | ms before damage number fades out |
+| Manual chop Y | `KerryGameEngine.kt` | `-120f` | Spawn Y offset for manual chop damage numbers |
+| DPS Y | `KerryGameEngine.kt` | `-60f` | Spawn Y offset for DoT/auto damage numbers |
 
 ## Build & Run
 
