@@ -17,6 +17,8 @@ import kotlin.random.Random
 class KerryGameEngine {
 
     private var nextParticleId = 0L
+    private var nextDamageNumberId = 0L
+    private var nextQuoteId = 0L
     private var lastChopTs = 0L
     private var comboDecayAccumulator = 0L
     private var fireDamageAccumulator = 0L
@@ -65,15 +67,25 @@ class KerryGameEngine {
             }
         }
 
-        val autoDamage = updated.upgrades.autoChopLevel * 0.32f * (deltaMs / 100f)
-        if (autoDamage > 0f) {
-            updated = applyDamage(updated, autoDamage, isManual = false)
+        // Stronger Arms: continuous damage only while autoChopActiveMs > 0 (triggered by a hit)
+        if (updated.autoChopActiveMs > 0) {
+            updated = updated.copy(autoChopActiveMs = (updated.autoChopActiveMs - deltaMs).coerceAtLeast(0L))
+            val autoDamage = updated.upgrades.autoChopLevel * 0.8f * (deltaMs / 100f)
+            if (autoDamage > 0f) {
+                updated = applyDamage(updated, autoDamage, isManual = false, showDamageNumber = true)
+            }
         }
 
-        if (updated.upgrades.fireAxeLevel > 0 && fireDamageAccumulator >= 350) {
+        // Fire axe: burn ticks every 350ms while fireAxeActiveMs > 0 (triggered by a hit)
+        if (updated.fireAxeActiveMs > 0) {
+            updated = updated.copy(fireAxeActiveMs = (updated.fireAxeActiveMs - deltaMs).coerceAtLeast(0L))
+            if (updated.upgrades.fireAxeLevel > 0 && fireDamageAccumulator >= 350) {
+                fireDamageAccumulator = 0
+                val burn = updated.upgrades.fireAxeLevel * 2.0f
+                updated = applyDamage(updated, burn, isManual = false, showDamageNumber = true)
+            }
+        } else {
             fireDamageAccumulator = 0
-            val burn = updated.upgrades.fireAxeLevel * 0.9f
-            updated = applyDamage(updated, burn, isManual = false)
         }
 
         if (updated.shakeStrength > 0f) {
@@ -81,7 +93,26 @@ class KerryGameEngine {
         }
 
         if (updated.swingPhase > 0f) {
-            updated = updated.copy(swingPhase = (updated.swingPhase - 0.08f).coerceAtLeast(0f))
+            updated = updated.copy(
+                swingPhase = (updated.swingPhase - 0.08f).coerceAtLeast(0f)
+            )
+        }
+
+        // Decoupled animation timer — advances independently from swingPhase so all 145 frames play.
+        // During a swing: swingPhase keeps it alive. After swingPhase hits 0, follow-through continues
+        // until the full animation cycle (ANIM_TOTAL_MS) completes, then resets to idle (0).
+        // During hold-chop: swingPhase is refreshed every ~130 ms so the timer loops seamlessly.
+        val ANIM_TOTAL_MS = 480L  // ~30 frames visible per swing
+        val animRunning = updated.swingPhase > 0f || updated.animElapsedMs in 1 until ANIM_TOTAL_MS
+        if (animRunning) {
+            val newMs = updated.animElapsedMs + deltaMs
+            updated = updated.copy(
+                animElapsedMs = when {
+                    newMs >= ANIM_TOTAL_MS && updated.swingPhase > 0f -> newMs % ANIM_TOTAL_MS  // looping hold
+                    newMs >= ANIM_TOTAL_MS -> 0L                                                 // follow-through done → idle
+                    else -> newMs
+                }
+            )
         }
 
         val chipped = updated.chips.mapNotNull { chip ->
@@ -98,17 +129,33 @@ class KerryGameEngine {
             }
         }
 
+        val decayedDamageNumbers = updated.damageNumbers.mapNotNull { dmg ->
+            val remaining = dmg.lifeMs - deltaMs
+            if (remaining <= 0L) {
+                null
+            } else {
+                dmg.copy(y = dmg.y - 1f, lifeMs = remaining)
+            }
+        }
+
+        val decayedQuotes = updated.quotes.mapNotNull { quote ->
+            val remaining = quote.lifeMs - deltaMs
+            if (remaining <= 0L) {
+                null
+            } else {
+                quote.copy(lifeMs = remaining)
+            }
+        }
+
         updated = updated.copy(
             chips = chipped,
+            damageNumbers = decayedDamageNumbers,
+            quotes = decayedQuotes,
             backgroundScroll = (updated.backgroundScroll + (deltaMs * 0.03f)) % 10000f,
             bossBannerMs = (updated.bossBannerMs - deltaMs.toInt()).coerceAtLeast(0),
             comboBurstMs = (updated.comboBurstMs - deltaMs.toInt()).coerceAtLeast(0),
             missFlashMs = (updated.missFlashMs - deltaMs.toInt()).coerceAtLeast(0)
         )
-
-        if (updated.quoteVisible && Random.nextFloat() < 0.0111f) {
-            updated = updated.copy(quoteVisible = false)
-        }
 
         return updated
     }
@@ -118,14 +165,14 @@ class KerryGameEngine {
             return state to false
         }
         val elapsed = nowMs - lastChopTs
-        val minGap = max(80L, 360L - (state.upgrades.axeSpeedLevel * 22L))
+        val minGap = max(80L, 844L - (state.upgrades.axeSpeedLevel * 22L))
         if (elapsed in 1 until minGap) {
             return state to false
         }
         lastChopTs = nowMs
 
         var damage = 10f + state.upgrades.axePowerLevel * 2.4f
-        if (state.upgrades.doubleChopLevel > 0 && Random.nextFloat() < (0.08f + state.upgrades.doubleChopLevel * 0.03f)) {
+        if (state.upgrades.doubleChopLevel > 0 && Random.nextFloat() < (0.15f + state.upgrades.doubleChopLevel * 0.03f)) {
             damage *= 2f
         }
 
@@ -138,6 +185,8 @@ class KerryGameEngine {
             chopCount = state.chopCount + 1,
             combo = min(100, state.combo + comboInc),
             swingPhase = 1f,
+            fireAxeActiveMs = if (state.upgrades.fireAxeLevel > 0) 3000L else state.fireAxeActiveMs,
+            autoChopActiveMs = if (state.upgrades.autoChopLevel > 0) 3000L else state.autoChopActiveMs,
             shakeStrength = (state.shakeStrength + 4.5f).coerceAtMost(16f)
         )
         val reachedBurst = updated.combo >= 20 && state.combo < 20
@@ -158,10 +207,12 @@ class KerryGameEngine {
                 updated.chopCount % 50L == 0L ||
                 Random.nextFloat() < 0.08f
         if (shouldTalk) {
-            updated = updated.copy(
-                displayedQuote = kerryQuotes.random(),
-                quoteVisible = true
+            val newQuote = Quote(
+                id = nextQuoteId++,
+                text = kerryQuotes.random(),
+                lifeMs = 2080L
             )
+            updated = updated.copy(quotes = updated.quotes + newQuote)
         }
 
         updated = updated.copy(chips = updated.chips + spawnChips(updated.isBossTree))
@@ -213,11 +264,31 @@ class KerryGameEngine {
         else -> 0
     }
 
-    private fun applyDamage(state: GameUiState, rawDamage: Float, isManual: Boolean): GameUiState {
+    private fun applyDamage(state: GameUiState, rawDamage: Float, isManual: Boolean, showDamageNumber: Boolean = false): GameUiState {
         val comboDamage = rawDamage * state.comboMultiplier
         val newHealth = state.treeHealth - comboDamage
+        
+        var damageNumbers = state.damageNumbers
+        if (showDamageNumber && comboDamage > 0.1f) {
+            val baseX = 0f
+            val baseY = -120f
+            val jitterRangeX = 6f
+            val jitterRangeY = 6f
+            val dmgNum = DamageNumber(
+                id = nextDamageNumberId++,
+                damage = comboDamage.toInt(),
+                x = baseX,
+                y = baseY,
+                jitterX = Random.nextFloat() * 2f * jitterRangeX - jitterRangeX,
+                jitterY = Random.nextFloat() * 2f * jitterRangeY - jitterRangeY,
+                lifeMs = 600L
+            )
+            val capped = (damageNumbers + dmgNum).takeLast(8)
+            damageNumbers = capped
+        }
+        
         if (newHealth > 0f) {
-            return state.copy(treeHealth = newHealth)
+            return state.copy(treeHealth = newHealth, damageNumbers = damageNumbers)
         }
 
         val woodGainBase = if (state.isBossTree) 35 else 12
@@ -261,7 +332,8 @@ class KerryGameEngine {
             isBossTree = boss,
             shakeStrength = (state.shakeStrength + if (boss) 10f else 6f).coerceAtMost(20f),
             dailyChallengeProgress = challengeProgress,
-            dailyChallengeDone = challengeDone
+            dailyChallengeDone = challengeDone,
+            damageNumbers = damageNumbers
         )
     }
 
@@ -311,8 +383,7 @@ class KerryGameEngine {
             chopCount = 0,
             combo = 0,
             comboMultiplier = 1f,
-            displayedQuote = "",
-            quoteVisible = false,
+            quotes = emptyList(),
             showSummary = false,
             summaryWave = 0,
             summaryWoodGained = 0,

@@ -14,14 +14,12 @@ data class SpriteSheetSpec(
 )
 
 object SpriteSheetCatalog {
-    val kerry = SpriteSheetSpec(assetPath = "sprites/kerry_sheet.png", frameWidth = 128, frameHeight = 128)
     val tree = SpriteSheetSpec(assetPath = "sprites/tree_sheet2.png", frameWidth = 473, frameHeight = 542)
     val treeStump = SpriteSheetSpec(assetPath = "sprites/tree_stump_sheet.png", frameWidth = 32, frameHeight = 32)
-    val axe = SpriteSheetSpec(assetPath = "sprites/axe_sheet.png", frameWidth = 512, frameHeight = 512)
     val effects = SpriteSheetSpec(assetPath = "sprites/effects_sheet.png", frameWidth = 205, frameHeight = 185)
     val background = SpriteSheetSpec(assetPath = "sprites/background_sheet.png", frameWidth = 1280, frameHeight = 720)
 
-    val all: List<SpriteSheetSpec> = listOf(kerry, tree, treeStump, axe, effects, background)
+    val all: List<SpriteSheetSpec> = listOf(tree, treeStump, effects, background)
 }
 
 object SpriteSheetSupport {
@@ -68,51 +66,10 @@ object SpriteSheetSupport {
         return runCatching {
             context.assets.open(spec.assetPath).use { stream ->
                 val decoded = BitmapFactory.decodeStream(stream)
-                val cleaned = if (decoded != null) {
-                    var result = decoded
-                    if (needsKeyCleanup(spec.assetPath)) {
-                        result = removeSemiTransparentBlack(result)
-                    }
-                    if (needsWhiteHaloCleanup(spec.assetPath)) {
-                        result = removeNearWhiteBackground(result)
-                    }
-                    result
-                } else {
-                    null
-                }
+                val cleaned = decoded
                 cleaned?.asImageBitmap()
             }
         }.getOrNull()
-    }
-
-    private fun needsKeyCleanup(assetPath: String): Boolean {
-        return assetPath == "sprites/axe_sheet.png"
-    }
-
-    private fun needsWhiteHaloCleanup(assetPath: String): Boolean {
-        return assetPath == "sprites/kerry_sheet.png"
-    }
-
-    private fun removeSemiTransparentBlack(source: Bitmap): Bitmap {
-        val bitmap = source.copy(Bitmap.Config.ARGB_8888, true)
-        val width = bitmap.width
-        val height = bitmap.height
-        val pixels = IntArray(width * height)
-        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
-
-        for (i in pixels.indices) {
-            val color = pixels[i]
-            val alpha = Color.alpha(color)
-            val red = Color.red(color)
-            val green = Color.green(color)
-            val blue = Color.blue(color)
-            if (alpha <= 140 && red <= 50 && green <= 50 && blue <= 50) {
-                pixels[i] = 0
-            }
-        }
-
-        bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
-        return bitmap
     }
 
     private fun removeNearBlackBackground(source: Bitmap): Bitmap {

@@ -38,6 +38,22 @@ data class ParticleChip(
     var lifeMs: Long
 )
 
+data class DamageNumber(
+    val id: Long,
+    val damage: Int,
+    var x: Float,
+    var y: Float,
+    val jitterX: Float,
+    val jitterY: Float,
+    var lifeMs: Long
+)
+
+data class Quote(
+    val id: Long,
+    val text: String,
+    var lifeMs: Long
+)
+
 data class Achievement(
     val id: String,
     val title: String,
@@ -57,8 +73,7 @@ data class GameUiState(
     val chopCount: Long = 0,
     val combo: Int = 0,
     val comboMultiplier: Float = 1f,
-    val displayedQuote: String = "",
-    val quoteVisible: Boolean = false,
+    val quotes: List<Quote> = emptyList(),
     val started: Boolean = false,
     val showSummary: Boolean = false,
     val summaryWave: Int = 0,
@@ -81,8 +96,12 @@ data class GameUiState(
     val achievements: List<Achievement> = emptyList(),
     val shakeStrength: Float = 0f,
     val swingPhase: Float = 0f,
+    val animElapsedMs: Long = 0L,  // ms into the current chop animation; outlives swingPhase for follow-through
+    val fireAxeActiveMs: Long = 0L, // remaining ms of burn after a hit
+    val autoChopActiveMs: Long = 0L, // remaining ms of auto-chop after a hit
     val backgroundScroll: Float = 0f,
-    val chips: List<ParticleChip> = emptyList()
+    val chips: List<ParticleChip> = emptyList(),
+    val damageNumbers: List<DamageNumber> = emptyList()
 )
 
 val shopUpgrades = listOf(

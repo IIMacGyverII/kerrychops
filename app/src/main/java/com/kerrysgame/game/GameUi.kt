@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -45,21 +46,30 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.async
 import kotlin.math.roundToInt
 
 @Composable
@@ -81,9 +91,8 @@ fun KerryGameScreen(
             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         }
     }
-    val shakePx = with(LocalDensity.current) { state.shakeStrength.dp.toPx() }
-    val shakeX = if (state.shakeStrength > 0f) ((Math.random() - 0.5f) * shakePx).toFloat() else 0f
-    val shakeY = if (state.shakeStrength > 0f) ((Math.random() - 0.5f) * shakePx).toFloat() else 0f
+    val shakeX = 0f
+    val shakeY = 0f
 
     Box(
         modifier = Modifier
@@ -119,7 +128,7 @@ fun KerryGameScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                contentAlignment = Alignment.Center
+                contentAlignment = Alignment.TopCenter
             ) {
                 ChoppableTree(
                     state = state,
@@ -139,14 +148,17 @@ fun KerryGameScreen(
             }
         }
 
-        AnimatedVisibility(
-            visible = state.quoteVisible,
-            modifier = Modifier
-                .zIndex(30f)
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 102.dp, start = 16.dp, end = 16.dp)
-        ) {
-            QuoteBubble(text = state.displayedQuote)
+        // Render multiple quotes stacked vertically
+        state.quotes.forEachIndexed { index, quote ->
+            AnimatedVisibility(
+                visible = true,
+                modifier = Modifier
+                    .zIndex(30f)
+                    .align(Alignment.TopCenter)
+                    .padding(top = (16 + index * 40).dp, start = 16.dp, end = 16.dp)
+            ) {
+                QuoteBubble(text = quote.text)
+            }
         }
 
         if (shopOpen) {
@@ -307,7 +319,7 @@ private fun TopHud(state: GameUiState, modifier: Modifier = Modifier) {
         ) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                 Text("Wave ${state.wave}${if (state.isBossTree) " • BOSS" else ""}", color = Color.White, fontWeight = FontWeight.Bold)
-                Text("${state.seasonEvent.label}: ${state.seasonEvent.description}", color = Color(0xFFB8DDC8), style = MaterialTheme.typography.bodySmall)
+                Text("${state.seasonEvent.label}: ${state.seasonEvent.description}", color = Color(0xFFB8DDC8), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                 Text("Lifted white '78 Jeep • blue side letters", color = Color(0xFF9CC3FF), style = MaterialTheme.typography.bodySmall)
             }
         }
@@ -321,18 +333,38 @@ private fun TopHud(state: GameUiState, modifier: Modifier = Modifier) {
                 horizontalAlignment = Alignment.End
             ) {
                 Text("Wood ${state.wood}", color = Color(0xFFFFD08A), fontWeight = FontWeight.Bold)
-                if (state.combo >= 10) {
-                    Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFF2F1F08)) {
-                        Text(
-                            text = "Streak ${state.combo}",
-                            color = Color(0xFFFFE2A8),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
+                // Always reserve streak height — transparent when combo < 10 so card never resizes
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (state.combo >= 10) Color(0xFF2F1F08) else Color.Transparent
+                ) {
+                    Text(
+                        text = if (state.combo >= 10) "Streak ${state.combo}" else "Streak 0",
+                        color = if (state.combo >= 10) Color(0xFFFFE2A8) else Color.Transparent,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
                 Text("High ${state.highScore}", color = Color(0xFFFFE7BF), style = MaterialTheme.typography.bodySmall)
                 Text("x${"%.2f".format(state.comboMultiplier)} combo", color = Color(0xFFFFE7BF), style = MaterialTheme.typography.bodySmall)
+
+                // Active upgrades — only show owned ones
+                val u = state.upgrades
+                data class UpgradeLine(val label: String)
+                val activeUpgrades = buildList {
+                    if (u.axeSpeedLevel > 0) add(UpgradeLine("Quicker Axe Lv${u.axeSpeedLevel} -${u.axeSpeedLevel * 22}ms cd"))
+                    if (u.axePowerLevel > 0) add(UpgradeLine("Heavier Head Lv${u.axePowerLevel} +${"%.1f".format(u.axePowerLevel * 2.4f)}dmg"))
+                    if (u.autoChopLevel > 0) add(UpgradeLine("Stronger Arms Lv${u.autoChopLevel} +${"%.1f".format(u.autoChopLevel * 0.8f)}dps for 3s"))
+                    if (u.luckyWoodLevel > 0) add(UpgradeLine("Wood Magnet Lv${u.luckyWoodLevel} ${u.luckyWoodLevel * 10}% bonus"))
+                    if (u.fireAxeLevel > 0) add(UpgradeLine("Fire Axe Lv${u.fireAxeLevel} ${u.fireAxeLevel * 2}burn/0.35s for 3s"))
+                    if (u.doubleChopLevel > 0) add(UpgradeLine("Double Chop Lv${u.doubleChopLevel} ${((0.15f + u.doubleChopLevel * 0.03f) * 100).toInt()}% chance"))
+                }
+                if (activeUpgrades.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    activeUpgrades.forEach { up ->
+                        Text(up.label, color = Color(0xFFB8DDC8), style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
         }
     }
@@ -342,6 +374,7 @@ private fun TopHud(state: GameUiState, modifier: Modifier = Modifier) {
 private fun ChoppableTree(state: GameUiState, onChop: () -> Unit) {
     val healthFraction = (state.treeHealth / state.treeMaxHealth).coerceIn(0f, 1f)
     val context = LocalContext.current
+    val textMeasurer = rememberTextMeasurer()
     val treeSpec = SpriteSheetCatalog.tree
     val stumpSpec = SpriteSheetCatalog.treeStump
     val effectsSpec = SpriteSheetCatalog.effects
@@ -349,8 +382,11 @@ private fun ChoppableTree(state: GameUiState, onChop: () -> Unit) {
     val stumpBitmap = remember(context) { SpriteSheetSupport.loadImageBitmap(context, stumpSpec) }
     val effectsBitmap = remember(context) { SpriteSheetSupport.loadImageBitmap(context, effectsSpec) }
     val swingFolder = "sprites/lumberjackswings"
-    val swingFrameNames = remember(context) { SpriteSheetSupport.listAssets(context, swingFolder) }
+    val swingFrameNames = remember(context) { 
+        SpriteSheetSupport.listAssets(context, swingFolder)
+    }
     val swingCache = remember { mutableStateMapOf<Int, ImageBitmap>() }
+    var showWarmupOverlay by remember { mutableStateOf(swingFrameNames.isNotEmpty()) }
     val firstSwingFrame = remember(context, swingFrameNames) {
         swingFrameNames.firstOrNull()?.let { firstFrameName ->
             SpriteSheetSupport.loadFrame(
@@ -363,32 +399,83 @@ private fun ChoppableTree(state: GameUiState, onChop: () -> Unit) {
     }
 
     LaunchedEffect(swingFrameNames) {
-        if (swingFrameNames.isEmpty() || swingCache.isNotEmpty()) return@LaunchedEffect
+        if (swingFrameNames.isEmpty()) return@LaunchedEffect
+        if (swingCache.size > 5) return@LaunchedEffect
 
-        swingFrameNames.forEachIndexed { index, frameName ->
-            val frame = withContext(Dispatchers.IO) {
-                SpriteSheetSupport.loadFrame(
-                    context = context,
-                    assetPath = "$swingFolder/$frameName",
-                    targetHeightPx = 360,
-                    removeWhite = true
-                )
+        // Load frames in parallel batches of 10
+        val batchSize = 10
+        for (batchStart in swingFrameNames.indices step batchSize) {
+            val batchEnd = minOf(batchStart + batchSize, swingFrameNames.size)
+            val jobs = (batchStart until batchEnd).map { index ->
+                async(Dispatchers.IO) {
+                    if (swingCache.containsKey(index)) {
+                        return@async index
+                    }
+                    val frameName = swingFrameNames[index]
+                    val frame = SpriteSheetSupport.loadFrame(
+                        context = context,
+                        assetPath = "$swingFolder/$frameName",
+                        targetHeightPx = 360,
+                        removeWhite = true
+                    )
+                    if (frame != null) {
+                        swingCache[index] = frame
+                    }
+                    index
+                }
             }
-            if (frame != null) {
-                swingCache[index] = frame
-            }
+            jobs.awaitAll()
         }
     }
+
+    LaunchedEffect(swingFrameNames, swingCache.size) {
+        if (!showWarmupOverlay) return@LaunchedEffect
+        if (swingFrameNames.isEmpty()) {
+            showWarmupOverlay = false
+            return@LaunchedEffect
+        }
+
+        val threshold = minOf(18, swingFrameNames.size)
+        if (swingCache.size >= threshold) {
+            delay(450)
+            showWarmupOverlay = false
+        }
+    }
+
+    // Fallback: timeout after 3 seconds to ensure overlay dismisses
+    LaunchedEffect(Unit) {
+        delay(3000)
+        if (showWarmupOverlay) {
+            showWarmupOverlay = false
+        }
+    }
+
+    // Capture canvas size exactly once from the View measurement system.
+    // This is immune to Compose recomposition races (swingCache loads, combo changes, etc.)
+    val stableW = remember { mutableStateOf(0f) }
+    val stableH = remember { mutableStateOf(0f) }
 
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .fillMaxWidth()
             .height(420.dp)
+            .onSizeChanged { newSize ->
+                if (stableW.value == 0f && newSize.width > 0) stableW.value = newSize.width.toFloat()
+                if (stableH.value == 0f && newSize.height > 0) stableH.value = newSize.height.toFloat()
+            }
             .pointerInput(Unit) {
                 detectTapGestures(
-                    onTap = { onChop() },
+                    onTap = {
+                        if (!showWarmupOverlay) {
+                            onChop()
+                        }
+                    },
                     onPress = {
+                        if (showWarmupOverlay) {
+                            tryAwaitRelease()
+                            return@detectTapGestures
+                        }
                         var keepHolding = true
                         val holdJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
                             while (keepHolding) {
@@ -404,19 +491,23 @@ private fun ChoppableTree(state: GameUiState, onChop: () -> Unit) {
             }
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val centerX = size.width / 2
-            val centerY = size.height / 2 + 20f
-            val sceneOffsetX = size.width * 0.15f
-            val sceneOffsetY = size.height * 0.5f
+            // Use the View-measured locked dimensions; fallback to draw-scope size only on first frame
+            val layoutWidth = if (stableW.value > 0f) stableW.value else size.width
+            val layoutHeight = if (stableH.value > 0f) stableH.value else size.height
+            val centerX = layoutWidth / 2
+            val centerY = layoutHeight / 2 + 20f
+            val sceneOffsetX = layoutWidth * 0.15f
+            val sceneOffsetY = layoutHeight * 0.5f
             val spriteScaleMultiplier = 1.5f
-            val kerryExtraOffsetX = size.width * 0.02f
-            val kerryExtraOffsetY = -size.height * 0.1f
-            val treeExtraOffsetX = size.width * 0.05f
-            val treeExtraOffsetY = size.height * 0.2f
+            val kerryExtraOffsetX = layoutWidth * 0.02f
+            val kerryExtraOffsetY = -layoutHeight * 0.15f
+            val treeExtraOffsetX = layoutWidth * 0.05f
+            val treeExtraOffsetY = layoutHeight * 0.2f
             val treeSizeBoost = 1.3f
-            val timerGaugeOffsetX = size.width * 0.22f
-            val timerGaugeOffsetY = -size.height * 0.05f
-            val effectsOffsetX = size.width * 0.5f
+            val timerGaugeOffsetX = layoutWidth * 0.22f
+            val timerGaugeOffsetY = -layoutHeight * 0.05f
+            val effectsOffsetX = layoutWidth * 0.22f
+            val effectsOffsetY = layoutHeight * 0.42f
 
             repeat(3) { i ->
                 val stumpX = centerX + 120f + (i * 60f)
@@ -438,7 +529,7 @@ private fun ChoppableTree(state: GameUiState, onChop: () -> Unit) {
 
             if (treeBitmap != null) {
                 val treeAspect = treeSpec.frameWidth.toFloat() / treeSpec.frameHeight.toFloat()
-                val scale = (if (state.isBossTree) 2.304f else 2.16f) * spriteScaleMultiplier * treeSizeBoost
+                val scale = 2.16f * spriteScaleMultiplier * treeSizeBoost
                 val treeHeight = treeSpec.frameHeight * scale
                 val treeWidth = treeHeight * treeAspect
                 val treeTop = (centerY + 230f) - treeHeight + sceneOffsetY + treeExtraOffsetY
@@ -496,39 +587,23 @@ private fun ChoppableTree(state: GameUiState, onChop: () -> Unit) {
                 size = androidx.compose.ui.geometry.Size(56f, 8f)
             )
             
-            // Combo glow aura around Kerry
-            if (state.combo >= 20) {
-                val glowPulse = ((state.combo % 10) / 10f)
-                val glowRadius = 55f + (glowPulse * 10f)
-                val glowAlpha = (0.3f + glowPulse * 0.2f).coerceIn(0f, 0.5f)
-                drawCircle(
-                    color = Color(0xFFFFD700).copy(alpha = glowAlpha),
-                    radius = glowRadius,
-                    center = Offset(kerryPivot.x, kerryPivot.y - 20f)
-                )
-                drawCircle(
-                    color = Color(0xFFFFE44D).copy(alpha = glowAlpha * 0.6f),
-                    radius = glowRadius - 8f,
-                    center = Offset(kerryPivot.x, kerryPivot.y - 20f)
-                )
-            }
-            
             val swingFrameCount = swingFrameNames.size
-            val swingIndex = if (swingFrameCount > 0 && state.swingPhase > 0f) {
-                ((1f - state.swingPhase) * (swingFrameCount - 1)).toInt().coerceIn(0, swingFrameCount - 1)
+            // Decoupled time-based frame selection: animElapsedMs drives which frame to show.
+            // animElapsedMs runs from 0..2400 ms independently of swingPhase, so all 145 frames
+            // are sampled at ~60 fps during each 2.4 s animation cycle.
+            val ANIM_TOTAL_MS = 480L
+            val isAnimating = state.swingPhase > 0f || state.animElapsedMs > 0L
+            val swingIndex = if (swingFrameCount > 0 && isAnimating) {
+                ((state.animElapsedMs * swingFrameCount) / ANIM_TOTAL_MS).toInt()
+                    .coerceIn(0, swingFrameCount - 1)
             } else if (swingFrameCount > 0) {
                 0
             } else {
                 -1
             }
             val swingBitmap = if (swingIndex >= 0) {
+                // Only use cached frames, no on-demand loading
                 swingCache[swingIndex]
-                    ?: SpriteSheetSupport.loadFrame(
-                        context = context,
-                        assetPath = "$swingFolder/${swingFrameNames[swingIndex]}",
-                        targetHeightPx = 360,
-                        removeWhite = true
-                    )?.also { swingCache[swingIndex] = it }
                     ?: swingCache[0]
                     ?: firstSwingFrame
             } else {
@@ -549,56 +624,12 @@ private fun ChoppableTree(state: GameUiState, onChop: () -> Unit) {
 
             // Enhanced particle effects
             val effectsFramesPerRow = effectsBitmap?.let { (it.width / effectsSpec.frameWidth).coerceAtLeast(1) } ?: 1
-            state.chips.forEach { chip ->
-                val chipRotation = (chip.x + chip.y) * 3f
-
-                if (effectsBitmap != null) {
-                    val chipFrame = ((chip.lifeMs / 40L).toInt() % effectsFramesPerRow)
-                    val chipIndex = chipFrame
-                    val chipSize = 34f
-                    rotate(chipRotation, pivot = Offset(centerX + chip.x + effectsOffsetX, centerY + chip.y)) {
-                        drawRect(
-                            color = Color(0xFFFFE0A3).copy(alpha = 0.45f),
-                            topLeft = Offset(centerX + chip.x + effectsOffsetX - chipSize * 0.45f, centerY + chip.y - chipSize * 0.45f),
-                            size = androidx.compose.ui.geometry.Size(chipSize * 0.9f, chipSize * 0.9f)
-                        )
-                        drawSpriteFrame(
-                            bitmap = effectsBitmap,
-                            frameWidth = effectsSpec.frameWidth,
-                            frameHeight = effectsSpec.frameHeight,
-                            frameIndex = chipIndex,
-                            dstTopLeft = Offset(centerX + chip.x + effectsOffsetX - chipSize * 0.5f, centerY + chip.y - chipSize * 0.5f),
-                            dstSize = androidx.compose.ui.geometry.Size(chipSize, chipSize)
-                        )
-                    }
-
-                    // Impact sparks (row 1)
-                    if (chip.y < 20f && kotlin.math.abs(chip.vx) > 2f) {
-                        val sparkFrame = ((chip.lifeMs / 30L).toInt() % effectsFramesPerRow)
-                        val sparkIndex = effectsFramesPerRow + sparkFrame
-                        val sparkSize = 22f
-                        drawRect(
-                            color = Color(0xFFFFF1B8).copy(alpha = 0.6f),
-                            topLeft = Offset(centerX + chip.x + effectsOffsetX - sparkSize * 0.5f, centerY + chip.y - 12f - sparkSize * 0.5f),
-                            size = androidx.compose.ui.geometry.Size(sparkSize, sparkSize)
-                        )
-                        drawSpriteFrame(
-                            bitmap = effectsBitmap,
-                            frameWidth = effectsSpec.frameWidth,
-                            frameHeight = effectsSpec.frameHeight,
-                            frameIndex = sparkIndex,
-                            dstTopLeft = Offset(centerX + chip.x + effectsOffsetX, centerY + chip.y - 10f),
-                            dstSize = androidx.compose.ui.geometry.Size(sparkSize, sparkSize)
-                        )
-                    }
-                }
-            }
 
             // Falling leaves from tree foliage
             if (state.swingPhase > 0.5f) {
                 repeat(4) { i ->
                     val leafX = centerX + effectsOffsetX + ((i - 2) * 30f) + (state.swingPhase * 15f)
-                    val leafY = centerY - 140f + (state.swingPhase * 40f) + (i * 8f)
+                    val leafY = centerY - 140f + effectsOffsetY + (state.swingPhase * 40f) + (i * 8f)
                     if (effectsBitmap != null && effectsFramesPerRow > 0) {
                         val leafFrame = ((state.swingPhase * 10f).toInt() + i) % effectsFramesPerRow
                         val leafIndex = (effectsFramesPerRow * 3) + leafFrame
@@ -628,7 +659,7 @@ private fun ChoppableTree(state: GameUiState, onChop: () -> Unit) {
                     val dustSize = 64f
                     drawRect(
                         color = Color(0xFFFFE8C4).copy(alpha = 0.35f),
-                        topLeft = Offset(centerX + effectsOffsetX - dustSize * 0.55f, centerY - 34f),
+                        topLeft = Offset(centerX + effectsOffsetX - dustSize * 0.55f, centerY - 34f + effectsOffsetY),
                         size = androidx.compose.ui.geometry.Size(dustSize * 1.1f, dustSize * 0.9f)
                     )
                     drawSpriteFrame(
@@ -636,9 +667,63 @@ private fun ChoppableTree(state: GameUiState, onChop: () -> Unit) {
                         frameWidth = effectsSpec.frameWidth,
                         frameHeight = effectsSpec.frameHeight,
                         frameIndex = dustIndex,
-                        dstTopLeft = Offset(centerX + effectsOffsetX - dustSize * 0.5f, centerY - 30f),
+                        dstTopLeft = Offset(centerX + effectsOffsetX - dustSize * 0.5f, centerY - 30f + effectsOffsetY),
                         dstSize = androidx.compose.ui.geometry.Size(dustSize, dustSize)
                     )
+                }
+            }
+
+            // Damage numbers floating up from center
+            state.damageNumbers.forEach { dmg ->
+                val alpha = (dmg.lifeMs / 1000f).coerceIn(0f, 1f)
+                val displayX = centerX + effectsOffsetX + dmg.x + dmg.jitterX
+                val displayY = centerY + effectsOffsetY + dmg.y + dmg.jitterY
+                val text = dmg.damage.toString()
+
+                val outlineStyle = TextStyle(
+                    color = Color(0xFFFFD700).copy(alpha = alpha),
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    drawStyle = Stroke(width = 2f)
+                )
+                val fillStyle = TextStyle(
+                    color = Color(0xFFFF6B6B).copy(alpha = alpha),
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                drawText(
+                    textMeasurer = textMeasurer,
+                    text = text,
+                    topLeft = Offset(displayX - 12f, displayY - 14f),
+                    style = outlineStyle
+                )
+                drawText(
+                    textMeasurer = textMeasurer,
+                    text = text,
+                    topLeft = Offset(displayX - 12f, displayY - 14f),
+                    style = fillStyle
+                )
+            }
+        }
+
+        if (showWarmupOverlay) {
+            val loaded = swingCache.size
+            val total = swingFrameNames.size.coerceAtLeast(1)
+            val pct = ((loaded.toFloat() / total.toFloat()) * 100f).toInt().coerceIn(0, 100)
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xCC08110E))
+                    .zIndex(40f),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
+                    Text("Loading Kerry...", color = Color(0xFFFFD08A), style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Text("Preparing chop animation: $pct%", color = Color(0xFFD6E6DB), style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Text("Tip: Tap or hold to swing when ready.", color = Color(0xFFAFC4B8), style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -690,6 +775,9 @@ private fun BottomControls(state: GameUiState, onUpgradeClick: () -> Unit) {
                 )
                 if (state.dailyChallengeDone) {
                     Text("Done. You can now brag to exactly nobody.", color = Color(0xFFFFD08A), style = MaterialTheme.typography.bodySmall)
+                } else {
+                    // Reserve same height so layout doesn't shift when done text appears
+                    Text(" ", color = Color.Transparent, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -710,7 +798,6 @@ private fun QuoteBubble(text: String) {
         color = Color(0xEE101010),
         tonalElevation = 2.dp,
         modifier = Modifier
-            .fillMaxWidth()
             .border(1.dp, Color(0xFF6E6E6E), RoundedCornerShape(14.dp))
     ) {
         Text(

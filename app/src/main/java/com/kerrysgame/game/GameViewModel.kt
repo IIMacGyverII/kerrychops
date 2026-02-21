@@ -42,7 +42,6 @@ class GameViewModel(
         }
 
         _uiState.value = newState
-        soundEffectManager.playSwing()
         if (newState.wave > previous.wave) {
             soundEffectManager.playCrack()
             soundEffectManager.playCollect()
@@ -110,7 +109,13 @@ class GameViewModel(
         tickJob = viewModelScope.launch {
             while (true) {
                 delay(16L)
-                _uiState.value = engine.onTick(_uiState.value, 16L)
+                val previous = _uiState.value
+                val newState = engine.onTick(previous, 16L)
+                _uiState.value = newState
+                // Trigger swing sound when animElapsedMs crosses 240ms (halfway through 480ms animation)
+                if (previous.animElapsedMs in 1L until 120L && newState.animElapsedMs >= 120L) {
+                    soundEffectManager.playSwing()
+                }
             }
         }
     }

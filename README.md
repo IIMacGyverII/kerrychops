@@ -10,22 +10,31 @@ Endless arcade clicker about Kerry, a sarcastic lumberjack with a lifted white '
 - **Endless progression** with waves and boss trees every 10 waves.
 - **Seasonal modifiers** (spring / summer / autumn / winter with health/wood multipliers).
 - **Upgrade shop** with 6 upgrades: axe speed, axe power, auto chop, lucky wood, fire axe, double chop.
-  - Auto chop & fire axe now **show numeric damage markers** with gold outline
-  - Passive upgrades **significantly buffed** for better feel (2.5x auto chop, 2.2x fire axe, 2x double chop frequency)
 - **Combo system** (max 100, +5% damage per level, visual burst at combo 20+)
-- **Stacked quote system** - Kerry's sarcastic comments appear at top of screen, stack vertically when multiple fire
-- **No combo glow** behind Kerry (cleaner silhouette)
+- **Stacked quote system** — Kerry's sarcastic comments appear at top of screen, stack when multiple fire
 - **Daily challenge** (500 chops without miss) + 5 achievements
 - **Parallel frame preloading** on app startup (no startup jank)
 - **DataStore persistence** for all progression, upgrades, and stats
 
 ## Recent Improvements (Latest Session)
 
-✅ **Upgrade Balance**: Passive upgrades (auto chop + fire axe) now deal meaningful damage
-✅ **Damage Feedback**: Numeric hit markers with gold outline for passive upgrades
-✅ **Quote Display**: Moved to top of screen, extended duration +30%, tighter stacking
-✅ **Performance**: Frame loading fully parallellized (16x batch loading on IO thread)
-✅ **Animation Assets**: Replaced with transparent-background variants for cleaner visuals
+✅ **Animation**: Decoupled 145-frame animation timer from `swingPhase`. `animElapsedMs` runs independently so the full animation cycles smoothly over 480ms regardless of chop speed upgrades.  
+✅ **Sound sync**: Swing sound tied directly to `animElapsedMs` crossing 120ms (1/4 into the animation). Leading 412ms of silence trimmed from `axe_swing.ogg` via ffmpeg.  
+✅ **Chop speed**: Base chop cooldown set to 844ms (~1.2 chops/sec). Each Quicker Axe level reduces by 22ms, floor at 80ms.  
+✅ **Fire Axe**: Now hit-triggered DoT — each chop refreshes a 3-second burn window, ticking every 350ms. Stops if no new hit lands.  
+✅ **Stronger Arms**: Same hit-triggered pattern — active for 3 seconds after a chop, passive DPS stops when timer expires.  
+✅ **Upgrade HUD**: Top-right score card now lists owned upgrades with level and live effect values.
+
+## Upgrade Details
+
+| Upgrade | Effect per level |
+|---|---|
+| Quicker Axe | -22ms cooldown per level |
+| Heavier Head | +2.4 damage per level |
+| Stronger Arms | +0.8 DPS for 3s after each hit |
+| Wood Magnet | +10% bonus wood chance per level |
+| Fire Axe | +2 burn every 350ms for 3s after each hit |
+| Double Chop | +3% double-hit chance per level (base 15%) |
 
 ## Project Structure (important assets)
 
@@ -37,7 +46,16 @@ Endless arcade clicker about Kerry, a sarcastic lumberjack with a lifted white '
   - `background_sheet.png`
 - `app/src/main/res/raw/`
   - `kerrychopswoodintro.mp4`
-  - `axe_swing.ogg`, `wood_crack.ogg`, `wood_collect.ogg`
+  - `axe_swing.ogg` (leading silence trimmed), `wood_crack.ogg`, `wood_collect.ogg`
+
+## Key Constants (easy to tune)
+
+| Constant | File | Value | Purpose |
+|---|---|---|---|
+| `ANIM_TOTAL_MS` | `KerryGameEngine.kt` + `GameUi.kt` | `480L` | Full animation cycle duration |
+| Sound trigger | `GameViewModel.kt` | `120L` | ms into animation when swing sound fires |
+| Base cooldown | `KerryGameEngine.kt` | `844L` | Base ms between chops |
+| Burn/auto duration | `KerryGameEngine.kt` | `3000L` | ms fire axe / stronger arms stay active after hit |
 
 ## Build & Run
 
